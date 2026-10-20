@@ -92,8 +92,10 @@ struct NotchBand: View {
                 Group {
                     if let artwork = media.artwork { ArtworkView(image: artwork, size: 18) }
                     else {
+                        // Static while playing: a repeating effect would redraw the panel every frame for as
+                        // long as music plays. A single cue marks a track change instead.
                         Image(systemName: "waveform").font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.mint)
-                            .symbolEffect(.variableColor.iterative.dimInactiveLayers, options: .repeating, isActive: media.playing && !reduceMotion && !Motion.lowPower)
+                            .symbolEffect(.bounce, value: reduceMotion || Motion.lowPower ? "" : media.title)
                     }
                 }
                 .nookMatched("music-art", in: namespace)
