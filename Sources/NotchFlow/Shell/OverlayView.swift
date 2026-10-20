@@ -180,6 +180,7 @@ struct NotchBand: View {
                     .foregroundStyle(model.interaction.pinned ? Ink.primary : Ink.secondary)
             }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .tint(model.interaction.pinned ? Ink.silver : Ink.secondary)   // a state, not an action: no blue
             .frame(width: 26, height: 24)
             .help("More")
             .help(model.interaction.pinned ? "Kept open · More" : "More")
@@ -284,8 +285,9 @@ struct GlanceView: View {
             // The notification's own next step: Review a request (answered in the detail, never from
             // here), Join a call, Show a download, Open a failed run; otherwise View.
             let primary = model.notificationAction(record)
+            // The glyph carries the state's colour; the action itself is always the blue primary.
             Button(primary.title) { primary.perform() }
-                .buttonStyle(PillButtonStyle(prominent: true, tone: record.event.lifecycle.tone))
+                .buttonStyle(PillButtonStyle(prominent: true))
                 .help(primary.title == "View" ? "Show details" : primary.title)
                 .reveal(.detail)
             Button { model.dismissNotification() } label: { Image(systemName: "xmark") }

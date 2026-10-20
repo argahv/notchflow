@@ -6,22 +6,22 @@ frame by frame. An offline renderer draws `NotchShape` itself on a **light** men
 development Mac's dark menu bar hides the shoulder joint.
 
 Status: **Verified** (seen on screen or in recorded frames), **Partial** (seen before the palette pass,
-or only offscreen), or **Pending** (needs the display or a real interaction). The display went to sleep
-partway through Phase 4, so everything after it is still waiting for an on-screen pass.
+or only offscreen), or **Pending** (needs a real interaction or a recording). The display slept partway
+through Phase 4; the on-screen pass below was run after it woke.
 
 | # | Brief §14 check | Status | Evidence |
 |---|---|---|---|
 | 1 | Resting notch | Verified | Rest capture; offline render shows the shape 1 pt inside the hardware outline |
 | 2 | Idle → Hover | Verified | Hover capture and 8× render: the notch stretches 8 pt sideways and 5 pt down; silver light at the lower corners |
 | 3 | Hover → Compact | Verified | Frames: grows downward from the notch, content condenses in, sharp at ≈240 ms |
-| 4 | Compact → Expanded workspace | Verified (motion), Partial (agent workspace) | Frames: continuous growth; silhouette full size by ≈400 ms, staggered content reveal complete ≈440 ms. The agent two-column detail is offscreen only so far |
+| 4 | Compact → Expanded workspace | Verified | Frames: continuous growth; silhouette full size by ≈400 ms, staggered content reveal complete ≈440 ms. On screen: an agent card opens into Recent (6 steps) beside Session (project, branch, repository, app, started) |
 | 5 | Expanded → Idle | Verified | Frames: content leaves first, silhouette retracts into the notch |
-| 6 | Music opening and closing | Pending | |
+| 6 | Music opening and closing | Partial | On screen: the player opens black and silver (no player was running, so the scrubber and artwork travel aren't exercised yet) |
 | 7 | File approaching the notch | Pending | Needs a real drag (can't be scripted without Accessibility) |
 | 8 | File entering the shelf | Pending | Same |
-| 9 | Multiple activities stacking | Partial | Verified in 2.0 before the palette pass |
-| 10 | Failure notification opening | Partial | Verified in 2.0 ("Open run") before the palette pass |
-| 11 | Tools opening | Partial | Offscreen render of the new launcher; the morph isn't recorded yet |
+| 9 | Multiple activities stacking | Verified | On screen: six rows; amber only for waiting on you, red only on failure glyphs, running work silver |
+| 10 | Failure notification opening | Verified | On screen: the lower edge lights red briefly; red stays on the glyph, and the action is the blue primary |
+| 11 | Tools opening | Partial | On screen: the launcher's native-style monochrome glyphs; the tile-to-panel morph isn't recorded yet |
 | 12 | Rapid mid-animation switching | Verified | Glance → workspace → close within 270 ms: continuous, no snap, no blank frame |
 
 Specific rejection criteria from brief §12:

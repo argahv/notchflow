@@ -206,7 +206,7 @@ struct ActivityCapsule: View {
                 }
                 if event.actionURL != nil {
                     Button { model.openAction(record) } label: { Label(model.actionTitle(record), systemImage: event.kind == .download ? "folder" : "arrow.up.forward") }
-                        .buttonStyle(PillButtonStyle(prominent: true, tone: event.lifecycle == .failed ? .red : .accent))
+                        .buttonStyle(PillButtonStyle(prominent: true))
                 }
                 if !event.lifecycle.terminal {
                     Button("Snooze 10 min") { model.snooze(record) }.buttonStyle(PillButtonStyle())
