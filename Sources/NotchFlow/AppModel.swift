@@ -73,6 +73,7 @@ struct CommandItem: Identifiable {
     let battery = BatteryService()
     let backdrop = BackdropService()
     let bridge = EventBridge()
+    lazy var providers = ProviderHub(deliver: { [weak self] event in self?.ingest(event) })
     let shelf = ShelfService()
     var windows: WindowManager?
     var context: ModelContext?
@@ -98,13 +99,14 @@ struct CommandItem: Identifiable {
         if let data = UserDefaults.standard.data(forKey: "countdown"),
            let timer = try? JSONDecoder().decode(Countdown.self, from: data) { countdown = timer }
         applyRetention()
-        bridge.onEvent = { [weak self] event in self?.ingest(event) }
-        bridge.onError = { [weak self] error in self?.message = error }
-        if preferences.bridgeEnabled { bridge.start() }
+        let inbox = InboxProvider(bridge: bridge)
+        inbox.onError = { [weak self] error in self?.message = error }
+        providers.register(inbox)
+        providers.setEnabled(inbox.identifier, preferences.bridgeEnabled)
         clock.onTick = { [weak self] date in self?.tick(date) }
         clock.run(countdown.running)
         preferences.$bridgeEnabled.dropFirst().sink { [weak self] enabled in
-            if enabled { self?.bridge.start() } else { self?.bridge.stop() }
+            self?.providers.setEnabled("inbox", enabled)
         }.store(in: &subscriptions)
         preferences.$privacy.dropFirst().sink { [weak self] privateMode in
             DispatchQueue.main.async { if privateMode { self?.send(.endEditing) }; self?.reflow() }
@@ -133,6 +135,11 @@ struct CommandItem: Identifiable {
     // MARK: Derived content
 
     var visibleActivities: [ActivityRecord] { queue.visible(now: Date()) }
+    /// Live work in presentation order (see `ActivityRanking`).
+    var rankedActivities: [ActivityRecord] { ActivityRanking.rank(visibleActivities, context: rankingContext) }
+    var rankingContext: RankingContext { RankingContext(now: Date(), boosted: contextBoost) }
+    /// Categories the current context makes more relevant (set by the context engine).
+    @Published var contextBoost: Set<ActivityCategory> = []
     var workspaceActivities: [ActivityRecord] {
         // Rows keep their place while the workspace is open, including a task that just finished.
         workspaceActivityIDs.compactMap { id in queue.records.first(where: { $0.id == id }) }
@@ -313,7 +320,7 @@ struct CommandItem: Identifiable {
     }
 
     private func deliver(_ event: ActivityEvent) {
-        let item = AttentionItem(id: event.key, priority: AttentionPriority(phase: event.phase), arrived: Date())
+        let item = AttentionItem(id: event.key, priority: AttentionPriority(state: event.lifecycle), arrived: Date())
         switch attention.receive(item, context: attentionContext) {
         case .present(let item): present(item)
         case .queue: resumeAttention(after: max(0.6, (attention.nextEligible() ?? Date()).timeIntervalSinceNow + 0.05))
@@ -534,7 +541,8 @@ struct CommandItem: Identifiable {
     }
     private func persistTimer() { UserDefaults.standard.set(try? JSONEncoder().encode(countdown), forKey: "countdown") }
     private func persistQueue() {
-        do { try ActivityEvent.encoder().encode(queue).write(to: queueURL, options: .atomic) }
+        // History on disk never holds pending requests or sensitive summaries.
+        do { try ActivityEvent.encoder().encode(queue.historySafe).write(to: queueURL, options: .atomic) }
         catch { message = "Could not save activity history: \(error.localizedDescription)" }
     }
 
@@ -582,7 +590,7 @@ struct CommandItem: Identifiable {
         } else { backdrop.stop() }
     }
 
-    func stop() { clock.run(false); bridge.stop(); media.stop(); camera.stop(); backdrop.stop(); battery.stop() }
+    func stop() { clock.run(false); providers.stopAll(); media.stop(); camera.stop(); backdrop.stop(); battery.stop() }
 }
 
 extension Notification.Name {
