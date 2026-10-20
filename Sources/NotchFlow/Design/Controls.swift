@@ -30,10 +30,10 @@ struct IconButtonStyle: ButtonStyle {
             let active = enabled && (hovering || configuration.isPressed)
             configuration.label
                 .font(.system(size: size * 0.46, weight: .medium))
-                .foregroundStyle(enabled ? tint : Ink.disabled)
+                .foregroundStyle(!enabled ? Ink.disabled : hovering && tint == Ink.secondary ? Ink.primary : tint)
                 .frame(width: size, height: size)
-                .background(Circle().fill(Ink.hover.opacity(active ? (configuration.isPressed ? 1 : 0.85) : 0)))
-                .scaleEffect(configuration.isPressed && enabled ? 0.9 : 1)
+                .background(Circle().fill(Ink.hover.opacity(active ? (configuration.isPressed ? 1 : 0.8) : 0)))
+                .scaleEffect(configuration.isPressed && enabled ? 0.95 : 1)
                 .contentShape(Circle())
                 .onHover { hovering = $0 }
                 .animation(Motion.micro, value: hovering)
@@ -45,7 +45,7 @@ struct IconButtonStyle: ButtonStyle {
 /// Text action. Prominent pills carry the one primary action of a surface.
 struct PillButtonStyle: ButtonStyle {
     var prominent = false
-    var tone: Tone = .iris
+    var tone: Tone = .accent
     func makeBody(configuration: Configuration) -> some View { StyledButton(configuration: configuration, prominent: prominent, tone: tone) }
     private struct StyledButton: View {
         let configuration: ButtonStyleConfiguration
@@ -57,16 +57,18 @@ struct PillButtonStyle: ButtonStyle {
             configuration.label
                 .font(.system(size: 12, weight: .semibold))
                 .labelStyle(.titleAndIcon)
-                .foregroundStyle(!enabled ? Ink.disabled : prominent ? Ink.void : Ink.primary)
+                .foregroundStyle(!enabled ? Ink.disabled : prominent ? onTone : Ink.primary)
                 .padding(.horizontal, 12).frame(height: 26)
                 .background(Capsule().fill(fill))
-                .overlay(Capsule().strokeBorder(.white.opacity(prominent ? 0 : hovering ? 0.08 : 0.04), lineWidth: 0.75))
-                .scaleEffect(configuration.isPressed && enabled ? 0.96 : 1)
+                .overlay(Capsule().strokeBorder(Ink.silver.opacity(prominent || !enabled ? 0 : hovering ? 0.12 : 0.06), lineWidth: 0.5))
+                .scaleEffect(configuration.isPressed && enabled ? 0.98 : 1)
                 .contentShape(Capsule())
-                .onHover { hovering = $0 }
+                .onHover { hovering = enabled && $0 }
                 .animation(Motion.micro, value: hovering)
                 .animation(Motion.micro, value: configuration.isPressed)
         }
+        /// Text on a filled pill: white on blue and red, black on the lighter tones.
+        private var onTone: Color { [.accent, .red].contains(tone) ? .white : Ink.void }
         private var fill: Color {
             if !enabled { return Ink.surface }
             if prominent { return tone.color.opacity(configuration.isPressed ? 0.8 : hovering ? 1 : 0.92) }
@@ -113,11 +115,12 @@ struct DockButtonStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(selected ? Ink.iris : hovering ? Ink.primary : Ink.secondary)
+                .foregroundStyle(selected || hovering ? Ink.primary : Ink.secondary)
                 .frame(width: 26, height: 24)
                 .background {
                     if selected {
-                        Capsule().fill(Ink.iris.opacity(0.17)).nookMatched("dock-selection", in: slides ? namespace : nil)
+                        Capsule().fill(Ink.elevated).overlay(Capsule().strokeBorder(Ink.silver.opacity(0.14), lineWidth: 0.5))
+                            .nookMatched("dock-selection", in: slides ? namespace : nil)
                     } else if hovering {
                         Capsule().fill(Ink.hover.opacity(0.75))
                     }
@@ -175,7 +178,7 @@ extension BackHeader where Trailing == EmptyView {
 /// Empty states stay one compact row with a single clear action, never a large blank panel.
 struct CompactEmptyState: View {
     let symbol: String
-    var tone: Tone = .iris
+    var tone: Tone = .silver
     let title: String
     let detail: String
     var actionTitle: String?
@@ -200,7 +203,7 @@ struct CompactEmptyState: View {
 /// Determinate progress only; indeterminate work shows a spinner instead of an invented percentage.
 struct ProgressLine: View {
     let value: Double
-    var tone: Tone = .iris
+    var tone: Tone = .silver
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {

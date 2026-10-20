@@ -7,40 +7,46 @@ extension Color {
     }
 }
 
-/// Obsidian Liquid palette. Colour is functional: iris marks interaction and selection, mint success
-/// and live status, amber waiting, coral genuine failure, blue information. Never decoration.
+/// Obsidian & Silver. Nearly monochrome, like the hardware: black glass, graphite controls, silver
+/// light. Colour only carries meaning: blue for the primary or selected action, green for success,
+/// amber for something waiting on you, red for a genuine failure. Artwork and app icons keep theirs.
 enum Ink {
-    static let void = Color(hex: 0x08090D)
-    static let obsidian = Color(hex: 0x0D0F14)
-    static let surface = Color(hex: 0x15171E)
-    static let elevated = Color(hex: 0x1D2029)
-    static let hover = Color(hex: 0x282B36)
-
-    static let primary = Color(hex: 0xF2F2F7)
-    /// Metadata and secondary labels; ≈7:1 on `surface`. `muted` (≈4:1) is for glyphs and inactive chrome only.
-    static let secondary = Color(hex: 0xA0A3B1)
-    static let muted = Color(hex: 0x707481)
-    static let disabled = Color(hex: 0x555965)
-
-    static let iris = Color(hex: 0xA99BFF)
-    static let lavender = Color(hex: 0xC5BAFF)
-    static let mint = Color(hex: 0x73E0BD)
-    static let amber = Color(hex: 0xFFBE76)
-    static let coral = Color(hex: 0xFF858F)
-    static let blue = Color(hex: 0x82B8FF)
-    /// Reflective highlights on the surface's edge.
+    /// Physical Black: the camera housing and the resting notch.
+    static let void = Color(hex: 0x000000)
+    /// The expanded surface.
+    static let obsidian = Color(hex: 0x08090B)
+    /// Carbon: inner backgrounds.
+    static let surface = Color(hex: 0x111317)
+    /// Graphite: controls and selected items.
+    static let elevated = Color(hex: 0x202329)
+    static let hover = Color(hex: 0x2A2E35)
+    /// Titanium: separators and secondary surfaces.
+    static let titanium = Color(hex: 0x525760)
+    /// Silver: reflective highlights and neutral glyphs.
     static let silver = Color(hex: 0xC8CDD4)
+
+    /// Ice White.
+    static let primary = Color(hex: 0xF4F5F7)
+    /// Muted Silver: metadata and secondary labels (≈6:1 on Carbon). `muted` (≈3.9:1) is for glyphs only.
+    static let secondary = Color(hex: 0x9298A2)
+    static let muted = Color(hex: 0x6E747E)
+    static let disabled = Color(hex: 0x4A4F57)
+
+    static let accent = Color(hex: 0x0A84FF)
+    static let green = Color(hex: 0x30D158)
+    static let amber = Color(hex: 0xFFB340)
+    static let red = Color(hex: 0xFF453A)
 }
 
 enum Tone: Equatable {
-    case iris, mint, amber, coral, blue, neutral
+    case accent, silver, green, amber, red, neutral
     var color: Color {
         switch self {
-        case .iris: Ink.iris
-        case .mint: Ink.mint
+        case .accent: Ink.accent
+        case .silver: Ink.silver
+        case .green: Ink.green
         case .amber: Ink.amber
-        case .coral: Ink.coral
-        case .blue: Ink.blue
+        case .red: Ink.red
         case .neutral: Ink.secondary
         }
     }
@@ -73,10 +79,10 @@ extension ActivityPhase {
     var tone: Tone {
         switch self {
         case .waiting: .amber
-        case .failed: .coral
-        case .completed: .mint
+        case .failed: .red
+        case .completed: .green
         case .cancelled: .neutral
-        case .started, .progress: .blue
+        case .started, .progress: .silver
         }
     }
     var symbol: String {
@@ -95,9 +101,9 @@ extension ActivityState {
     var tone: Tone {
         switch self {
         case .needsInput, .waiting: .amber
-        case .failed: .coral
-        case .completed: .mint
-        case .running, .starting: .blue
+        case .failed: .red
+        case .completed: .green
+        case .running, .starting: .silver
         case .queued, .paused, .cancelled, .unknown: .neutral
         }
     }
@@ -132,10 +138,10 @@ extension ActivityState {
 extension AttentionPriority {
     var tone: Tone {
         switch self {
-        case .critical: .coral
+        case .critical: .red
         case .actionRequired: .amber
-        case .informational: .mint
-        case .background: .blue
+        case .informational: .green
+        case .background: .silver
         case .silent: .neutral
         }
     }

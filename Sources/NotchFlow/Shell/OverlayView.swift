@@ -40,7 +40,7 @@ struct OverlayView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.nookNamespace, space)
         .foregroundStyle(Ink.primary)
-        .tint(Ink.iris)
+        .tint(Ink.accent)
         .preferredColorScheme(.dark)
         .buttonStyle(.plain)
         .ignoresSafeArea()
@@ -110,7 +110,7 @@ struct NotchBand: View {
                     else {
                         // Static while playing: a repeating effect would redraw the panel every frame for as
                         // long as music plays. A single cue marks a track change instead.
-                        Image(systemName: "waveform").font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.mint)
+                        Image(systemName: "waveform").font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.silver)
                             .symbolEffect(.bounce, value: reduceMotion || Motion.lowPower ? "" : media.title)
                     }
                 }
@@ -162,11 +162,11 @@ struct NotchBand: View {
                 featureButton(feature, index: index + 4)
             }
             Spacer(minLength: 4)
-            dockButton(symbol: model.interaction.pinned ? "pin.fill" : "pin", help: model.interaction.pinned ? "Unpin" : "Keep open",
-                       selected: model.interaction.pinned, slides: false, index: 6) {
-                model.send(.togglePin)
-            }
+            // Fewer permanent controls: keeping the surface open lives in the menu, and the menu's
+            // glyph shows a pin while it's kept open.
             Menu {
+                Button(model.interaction.pinned ? "Stop keeping open" : "Keep open") { model.send(.togglePin) }
+                Divider()
                 Toggle("Quiet mode", isOn: $preferences.quietMode)
                 Toggle("Hide private details", isOn: $preferences.privacy)
                 Divider()
@@ -175,12 +175,16 @@ struct NotchBand: View {
                 Divider()
                 Button("Close") { model.windows?.close() }
             } label: {
-                Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold)).foregroundStyle(Ink.secondary)
+                Image(systemName: model.interaction.pinned ? "pin.fill" : "ellipsis")
+                    .font(.system(size: model.interaction.pinned ? 11 : 13, weight: .semibold))
+                    .foregroundStyle(model.interaction.pinned ? Ink.primary : Ink.secondary)
             }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             .frame(width: 26, height: 24)
             .help("More")
-            .reveal(.secondary, stagger: 7 * 0.022)
+            .help(model.interaction.pinned ? "Kept open · More" : "More")
+            .accessibilityLabel(model.interaction.pinned ? "More, kept open" : "More")
+            .reveal(.secondary, stagger: 6 * 0.022)
         }
         .padding(.leading, 6).padding(.trailing, model.form.ear + 6)
     }
@@ -214,7 +218,7 @@ struct NotchBand: View {
 struct DropApproach: View {
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "tray.and.arrow.down.fill").foregroundStyle(Ink.iris)
+            Image(systemName: "tray.and.arrow.down.fill").foregroundStyle(Ink.silver)
             Text("Drop to shelf").font(TypeScale.cardTitle)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -314,7 +318,7 @@ struct GlanceView: View {
             }
             .buttonStyle(IconButtonStyle(size: 30)).accessibilityLabel(media.playing ? "Pause" : "Play").reveal(.detail)
         case .timer:
-            ToneGlyph(symbol: "timer", tone: .iris, size: 30).nookMatched("timer-glyph", in: namespace).reveal(.primary)
+            ToneGlyph(symbol: "timer", tone: .silver, size: 30).nookMatched("timer-glyph", in: namespace).reveal(.primary)
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.timerLabel(at: clock.now)).font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit())
                     .contentTransition(.numericText(countsDown: true)).animation(Motion.micro, value: clock.now)
@@ -325,7 +329,7 @@ struct GlanceView: View {
             Button { model.toggleTimer() } label: { Image(systemName: model.countdown.running ? "pause.fill" : "play.fill") }
                 .buttonStyle(IconButtonStyle(size: 30)).accessibilityLabel(model.countdown.running ? "Pause timer" : "Resume timer").reveal(.detail)
         case .idle:
-            ToneGlyph(symbol: "waveform.path", tone: .iris, size: 30).reveal(.primary)
+            ToneGlyph(symbol: "waveform.path", tone: .silver, size: 30).reveal(.primary)
             text("Workspace", "Click to open · ⌃⌥Space", titleStagger: 0.03)
             Spacer(minLength: 8)
             Image(systemName: "chevron.down").font(.caption.weight(.semibold)).foregroundStyle(Ink.muted).reveal(.detail)

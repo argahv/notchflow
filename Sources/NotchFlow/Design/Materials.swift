@@ -113,24 +113,23 @@ struct NookMaterial: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         content.background {
+            // Flat tonal steps with a hairline: carbon at rest, graphite when touched or selected.
             shape.fill(fill)
-                .overlay(shape.strokeBorder(LinearGradient(colors: [.white.opacity(highlight), .white.opacity(0.012)],
-                                                           startPoint: .top, endPoint: .bottom), lineWidth: 0.75))
-                .shadow(color: .black.opacity(level == .elevated ? 0.4 : 0), radius: 12, y: 6)
+                .overlay(shape.strokeBorder(Ink.silver.opacity(highlight), lineWidth: 0.5))
         }
     }
     private var fill: Color {
         switch level {
-        case .ambient: Ink.obsidian.opacity(0.8)
-        case .interactive: pressed ? Ink.surface : hovering ? Ink.elevated : Ink.surface.opacity(0.92)
+        case .ambient: Ink.surface.opacity(0.7)
+        case .interactive: pressed ? Ink.surface : hovering ? Ink.elevated : Ink.surface.opacity(0.85)
         case .elevated: hovering ? Ink.hover : Ink.elevated
         }
     }
     private var highlight: Double {
         switch level {
-        case .ambient: 0.035
-        case .interactive: hovering ? 0.1 : 0.055
-        case .elevated: 0.12
+        case .ambient: 0.04
+        case .interactive: hovering ? 0.1 : 0.05
+        case .elevated: 0.08
         }
     }
 }

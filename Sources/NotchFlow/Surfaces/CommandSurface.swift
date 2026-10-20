@@ -11,7 +11,7 @@ struct CommandSurface: View {
         let results = Array(model.commandResults.prefix(Metrics.maxCommandRows))
         VStack(spacing: Metrics.gap) {
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Ink.iris)
+                Image(systemName: "magnifyingglass").foregroundStyle(Ink.secondary)
                 TextField("Search or run a command", text: $model.commandQuery)
                     .textFieldStyle(.plain).font(.system(size: 14))
                     .focused($focused)
@@ -35,7 +35,7 @@ struct CommandSurface: View {
                     Button { item.run() } label: {
                         HStack(spacing: 10) {
                             Image(systemName: item.symbol).frame(width: 18)
-                                .foregroundStyle(selected ? Ink.iris : Ink.secondary)
+                                .foregroundStyle(selected ? Ink.primary : Ink.secondary)
                             Text(item.title).font(TypeScale.body).foregroundStyle(Ink.primary).lineLimit(1)
                             Spacer(minLength: 8)
                             if let hint = item.hint { Text(hint).font(TypeScale.meta).foregroundStyle(Ink.secondary) }
@@ -43,7 +43,7 @@ struct CommandSurface: View {
                         .padding(.horizontal, 10).frame(height: Metrics.commandRow)
                         .background {
                             if selected {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Ink.iris.opacity(0.14))
+                                RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Ink.elevated)
                                     .matchedGeometryEffect(id: "selection", in: selection)
                             }
                         }

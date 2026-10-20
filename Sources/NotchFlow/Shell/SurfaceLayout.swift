@@ -11,6 +11,8 @@ enum Metrics {
     static let glanceHeight = 64.0
     static let stackLayer = 5.0
     static let codeLine = 15.0
+    static let agentRow = 19.0
+    static let agentColumnTitle = 16.0
     static let sectionHeader = 16.0
     static let filterBar = 26.0
     static let pad = 14.0
@@ -19,7 +21,7 @@ enum Metrics {
     static let emptyRow = 58.0
     static let activityRow = 52.0
     static let timerStrip = 40.0
-    static let tile = 68.0
+    static let tile = 60.0
     static let noteRow = 48.0
     static let searchField = 30.0
     static let todoRow = 30.0
@@ -77,7 +79,7 @@ enum Metrics {
                                     height: Metrics.glanceHeight + (depth > 0 ? Metrics.stackLayer * depth + 4 : 0)),
                            wing: Metrics.glanceWing, ear: 10, corner: 22)
         case .expanded:
-            let width = max(Metrics.workspaceWidth, display.notchWidth + 2 * Metrics.dockWing)
+            let width = workspaceWidth(display)
             return resolve(.content(width: width, height: workspaceHeight(snapshot, model), minHeight: 56, maxHeight: 420),
                            wing: Metrics.dockWing, ear: 14, corner: 28)
         }
@@ -98,7 +100,7 @@ enum Metrics {
             var height = 10.0 + Metrics.filterBar + Metrics.gap
             height += rows.isEmpty ? Metrics.emptyRow : stack(rows.count, Metrics.activityRow)
             height += Double(sections.filter { $0.title != nil }.count) * (Metrics.sectionHeader + Metrics.gap)
-            if let detail, let record = rows.first(where: { $0.id == detail }) { height += detailHeight(record) }
+            if let detail, let record = rows.first(where: { $0.id == detail }) { height += detailHeight(record, model: model) }
             return height + 12 + Metrics.timerStrip + pad
         case .music:
             return pad + (model.preferences.mediaEnabled ? 64 + (model.media.error == nil ? 0 : 20) : Metrics.emptyRow) + pad
@@ -173,11 +175,38 @@ enum Metrics {
     }
 
     /// Inline detail under an activity or history row: summary (up to four lines) and actions.
-    static func detailHeight(_ record: ActivityRecord) -> Double {
+    static func detailHeight(_ record: ActivityRecord, model: AppModel? = nil) -> Double {
         let summary = record.event.summary ?? ""
         let lines = summary.isEmpty ? 0 : min(4, Int((Double(summary.count) / 62).rounded(.up)))
         let request = record.actionableRequest().map { requestHeight($0) + 10 } ?? 0
-        return request + Double(lines) * 16 + 10 + 26 + 12
+        var agent = 0.0
+        if record.event.agent != nil, let model {
+            let steps = Double(max(1, model.agentSteps[record.id]?.count ?? 0))
+            let facts = Double(agentFacts(record, model: model).count)
+            let column = { (rows: Double) in Metrics.agentColumnTitle + rows * Metrics.agentRow }
+            agent = (agentTwoColumns(model) ? max(column(steps), column(facts)) : column(steps) + 10 + column(facts)) + 10
+        }
+        return request + agent + Double(lines) * 16 + 10 + 26 + 12
+    }
+
+    /// Two columns once the workspace leaves room for both (about 200 pt each).
+    @MainActor static func agentTwoColumns(_ model: AppModel) -> Bool { workspaceWidth(model.geometry) >= 480 }
+
+    /// The open workspace's width on this display (the same rule the expanded form uses).
+    static func workspaceWidth(_ display: DisplayGeometry) -> Double {
+        min(max(Metrics.workspaceWidth, display.notchWidth + 2 * Metrics.dockWing), display.width - 2 * SurfaceGeometryEngine.screenMargin)
+    }
+
+    /// What a session is, from fields its hook events carry.
+    @MainActor static func agentFacts(_ record: ActivityRecord, model: AppModel) -> [(String, String)] {
+        let event = record.event
+        var facts: [(String, String)] = []
+        if let project = event.project { facts.append(("Project", project)) }
+        if let branch = event.branch { facts.append(("Branch", branch)) }
+        if let repository = event.agent?.repository { facts.append(("Repository", repository)) }
+        if let host = model.host(for: record) { facts.append(("App", host.name)) }
+        if let first = record.firstSeen { facts.append(("Started", first.formatted(date: .omitted, time: .shortened))) }
+        return facts
     }
 
     /// The permission prompt: header, the command or path being authorized, and the answers.

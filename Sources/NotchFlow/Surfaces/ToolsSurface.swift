@@ -40,6 +40,8 @@ private struct Launcher: View {
     }
 }
 
+/// A launcher icon: a native-looking glyph and its name, no card until the pointer is on it. The
+/// chosen tile's background, icon and title grow into the tool's panel.
 private struct ToolTile: View {
     let tool: Tool
     let action: () -> Void
@@ -47,30 +49,34 @@ private struct ToolTile: View {
     @State private var hovering = false
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 7) {
+            VStack(spacing: 6) {
                 Image(systemName: tool.symbol)
-                    .font(.system(size: 17, weight: .medium)).foregroundStyle(Ink.iris)
+                    .font(.system(size: 18, weight: .regular)).foregroundStyle(hovering ? Ink.primary : Ink.silver)
                     .frame(height: 22)   // symbols differ in height; titles share one baseline
-                    .scaleEffect(hovering ? 1.07 : 1)
                     .nookMatched("tile-icon-\(tool.rawValue)", in: namespace)
-                Text(tool.title).font(.system(size: 11.5, weight: .medium)).foregroundStyle(Ink.primary).lineLimit(1)
+                Text(tool.title).font(.system(size: 11, weight: .medium)).foregroundStyle(hovering ? Ink.primary : Ink.secondary).lineLimit(1)
                     .fixedSize()
                     .nookMatched("tile-title-\(tool.rawValue)", in: namespace)
             }
             .frame(maxWidth: .infinity).frame(height: Metrics.tile)
             .background {
                 RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-                    .fill(hovering ? Ink.elevated : Ink.surface.opacity(0.92))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-                        .strokeBorder(LinearGradient(colors: [.white.opacity(hovering ? 0.1 : 0.05), .clear], startPoint: .top, endPoint: .bottom), lineWidth: 0.75))
+                    .fill(Ink.elevated.opacity(hovering ? 0.9 : 0))
                     .nookMatched("tile-\(tool.rawValue)", in: namespace)
             }
             .contentShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressScale())
         .onHover { hovering = $0 }
         .animation(Motion.micro, value: hovering)
         .accessibilityLabel(tool.title)
+    }
+}
+
+/// The 2 % press compression used by larger targets.
+struct PressScale: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.scaleEffect(configuration.isPressed ? 0.98 : 1).animation(Motion.micro, value: configuration.isPressed)
     }
 }
 
@@ -99,9 +105,9 @@ private struct ToolPanel: View {
         }
         .background {
             RoundedRectangle(cornerRadius: Radius.card + 4, style: .continuous)
-                .fill(Ink.surface.opacity(0.7))
+                .fill(Ink.surface.opacity(0.75))
                 .overlay(RoundedRectangle(cornerRadius: Radius.card + 4, style: .continuous)
-                    .strokeBorder(LinearGradient(colors: [.white.opacity(0.07), .clear], startPoint: .top, endPoint: .bottom), lineWidth: 0.75))
+                    .strokeBorder(Ink.silver.opacity(0.06), lineWidth: 0.5))
                 .padding(-8)
                 .nookMatched("tile-\(tool.rawValue)", in: namespace)
         }
@@ -114,7 +120,7 @@ private struct ToolPanel: View {
                 .buttonStyle(IconButtonStyle(size: 24, tint: Ink.secondary))
                 .help("Back · Esc").accessibilityLabel("Back")
             Image(systemName: tool.symbol)
-                .font(.system(size: 14, weight: .semibold)).foregroundStyle(Ink.iris)
+                .font(.system(size: 14, weight: .semibold)).foregroundStyle(Ink.silver)
                 .nookMatched("tile-icon-\(tool.rawValue)", in: namespace)
             // Sized by its own text so the title never truncates while it travels from the tile.
             Text(headerTitle).font(.system(size: 15, weight: .semibold)).foregroundStyle(Ink.primary).lineLimit(1)
@@ -208,7 +214,7 @@ private struct TodoRow: View {
         HStack(spacing: 8) {
             Button { model.toggle(item) } label: {
                 Image(systemName: item.completed ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(item.completed ? Ink.mint : Ink.secondary)
+                    .foregroundStyle(item.completed ? Ink.green : Ink.secondary)
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(IconButtonStyle(size: 24))
@@ -290,14 +296,14 @@ private struct EventRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Text(event.date, style: .time)
-                .font(TypeScale.numeral).foregroundStyle(Ink.iris)
+                .font(TypeScale.numeral).foregroundStyle(Ink.silver)
                 .padding(.horizontal, 8).frame(height: 22)
-                .background(Capsule().fill(Ink.iris.opacity(0.12)))
+                .background(Capsule().fill(Ink.elevated))
             Text(event.title).font(TypeScale.body).lineLimit(1)
             Spacer(minLength: 4)
             if let url = event.url, ["https", "http"].contains(url.scheme?.lowercased() ?? "") {
                 Link(destination: url) { Image(systemName: "arrow.up.forward") }
-                    .buttonStyle(IconButtonStyle(size: 24, tint: Ink.iris)).help("Open event link")
+                    .buttonStyle(IconButtonStyle(size: 24, tint: Ink.secondary)).help("Open event link")
             }
         }
         .frame(height: Metrics.eventRow)
@@ -327,7 +333,7 @@ private struct MirrorBody: View {
                         .clipShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
                         .overlay(alignment: .topLeading) {
                             Label("Camera on", systemImage: "circle.fill")
-                                .font(TypeScale.badge).foregroundStyle(Ink.mint)
+                                .font(TypeScale.badge).foregroundStyle(Ink.green)
                                 .padding(.horizontal, 8).frame(height: 22)
                                 .background(Capsule().fill(Ink.void.opacity(0.7)))
                                 .padding(8)
@@ -496,7 +502,7 @@ private struct ClipRow: View {
                     .font(TypeScale.meta).foregroundStyle(Ink.secondary).lineLimit(1)
             }
             Spacer(minLength: 6)
-            if copied { Text("Copied").font(TypeScale.badge).foregroundStyle(Ink.mint).transition(.opacity) }
+            if copied { Text("Copied").font(TypeScale.badge).foregroundStyle(Ink.green).transition(.opacity) }
             if hovering || item.pinned {
                 Button { model.clipboard.togglePin(item) } label: { Image(systemName: item.pinned ? "pin.fill" : "pin") }
                     .buttonStyle(IconButtonStyle(size: 24, tint: item.pinned ? Ink.primary : Ink.secondary))

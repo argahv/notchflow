@@ -38,6 +38,12 @@ struct CommandItem: Identifiable {
     @Published private(set) var interaction = InteractionState()
     @Published private(set) var route: Route = .activity(detail: nil)
     @Published private(set) var openNoteID: UUID?
+    /// Recent steps per agent session, from the states and tool names hooks already publish. Memory
+    /// only: never written to History, gone when NotchFlow quits.
+    struct AgentStep: Identifiable, Equatable { let id = UUID(); let date: Date; let label: String; let tone: Tone }
+    @Published private(set) var agentSteps: [String: [AgentStep]] = [:]
+    static let agentStepLimit = 6
+
     /// True while the silhouette is changing shape; the edge catches light, then settles.
     @Published private(set) var surfaceMoving = false
     @Published private(set) var form = SurfaceForm(size: CGSize(width: 208, height: 37.5), ear: 3, corner: 10, inset: 1)
@@ -432,6 +438,7 @@ struct CommandItem: Identifiable {
         do {
             try queue.ingest(event)
             persistQueue()
+            recordAgentStep(event)
             let updated = record(event.key)?.event
             let order = interaction.presentation == .expanded ? stackPlacement(for: event.key, prior: prior) : nil
             if updated == event && event.isMaterialChange(from: prior) { deliver(event) }
@@ -549,6 +556,15 @@ struct CommandItem: Identifiable {
         DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: work)
     }
     // MARK: Agents
+
+    private func recordAgentStep(_ event: ActivityEvent) {
+        guard let agent = event.agent, let state = agent.state, record(event.key)?.event == event else { return }
+        let label = state.label(tool: agent.tool)
+        var steps = agentSteps[event.key] ?? []
+        guard steps.first?.label != label else { return }
+        steps.insert(AgentStep(date: event.timestamp, label: label, tone: event.lifecycle.tone), at: 0)
+        agentSteps[event.key] = Array(steps.prefix(Self.agentStepLimit))
+    }
 
     /// Sends Allow or Deny to the waiting hook. The request is withdrawn at once so it can't be
     /// answered twice; the hook reports the agent's next state.
@@ -725,7 +741,7 @@ struct CommandItem: Identifiable {
             self.dropTargeted = false
             self.lastArrival = added.last
         })
-        if !added.isEmpty { illuminate(.mint) }
+        if !added.isEmpty { illuminate(.silver) }
         if openedByDrag {
             // A drop that opened the shelf hands the notch back once the file has landed.
             returnWork?.cancel()

@@ -33,7 +33,7 @@ struct HistorySurface: View {
                                 if confirmingClear { model.clearHistory(); confirmingClear = false }
                                 else { withAnimation(Motion.quick) { confirmingClear = true } }
                             }
-                            .buttonStyle(PillButtonStyle(prominent: confirmingClear, tone: .coral))
+                            .buttonStyle(PillButtonStyle(prominent: confirmingClear, tone: .red))
                             if confirmingClear {
                                 Button("Cancel") { withAnimation(Motion.quick) { confirmingClear = false } }.buttonStyle(PillButtonStyle())
                             }

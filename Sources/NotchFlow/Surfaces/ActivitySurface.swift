@@ -60,16 +60,16 @@ struct ActivitySurface: View {
     @ViewBuilder private var emptyState: some View {
         switch model.activityFilter {
         case .all:
-            CompactEmptyState(symbol: "checkmark.circle", tone: .mint, title: "Nothing needs you",
+            CompactEmptyState(symbol: "checkmark.circle", tone: .silver, title: "Nothing needs you",
                               detail: "Agent, build and download activity appears here as it happens.")
         case .agents:
-            CompactEmptyState(symbol: "sparkles", tone: .iris, title: "No agents running",
+            CompactEmptyState(symbol: "sparkles", tone: .silver, title: "No agents running",
                               detail: "Claude Code and Codex sessions appear here once their hooks are set up.")
         case .pipelines:
-            CompactEmptyState(symbol: "hammer", tone: .blue, title: "No pipelines running",
+            CompactEmptyState(symbol: "hammer", tone: .silver, title: "No pipelines running",
                               detail: "Commands wrapped with notchflow run appear here while they run.")
         case .downloads:
-            CompactEmptyState(symbol: "arrow.down.circle", tone: .blue, title: "No recent downloads",
+            CompactEmptyState(symbol: "arrow.down.circle", tone: .silver, title: "No recent downloads",
                               detail: "Download tracking isn't available yet.")
         case .done:
             CompactEmptyState(symbol: "clock", tone: .neutral, title: "Nothing finished today",
@@ -127,7 +127,7 @@ struct ActivityCapsule: View {
                         HStack(spacing: 5) {
                             Text(event.title).font(TypeScale.cardTitle).foregroundStyle(Ink.primary).lineLimit(1)
                             if record.isPinned {
-                                Image(systemName: "pin.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(Ink.iris)
+                                Image(systemName: "pin.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(Ink.silver)
                                     .accessibilityLabel("Pinned")
                             }
                         }
@@ -158,10 +158,8 @@ struct ActivityCapsule: View {
         .background {
             // The capsule's own surface is the shared element the glance's stack layers grow into.
             let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-            shape.fill(expanded || hovering ? Ink.elevated : Ink.surface.opacity(0.92))
-                .overlay(shape.strokeBorder(LinearGradient(colors: [.white.opacity(hovering || expanded ? 0.1 : 0.055), .white.opacity(0.012)],
-                                                           startPoint: .top, endPoint: .bottom), lineWidth: 0.75))
-                .shadow(color: .black.opacity(expanded ? 0.4 : 0), radius: 12, y: 6)
+            shape.fill(expanded ? Ink.elevated : hovering ? Ink.elevated.opacity(0.8) : Ink.surface.opacity(0.85))
+                .overlay(shape.strokeBorder(Ink.silver.opacity(expanded ? 0.1 : hovering ? 0.08 : 0.045), lineWidth: 0.5))
                 .nookMatched("stack-\(record.id)", in: namespace)
         }
         .onHover { hovering = $0 }
@@ -173,9 +171,9 @@ struct ActivityCapsule: View {
         switch event.lifecycle {
         case .running, .starting:
             if let progress = event.progress {
-                Text("\(Int(progress * 100))%").font(TypeScale.numeral).foregroundStyle(Ink.blue)
+                Text("\(Int(progress * 100))%").font(TypeScale.numeral).foregroundStyle(Ink.primary)
             } else {
-                ProgressView().controlSize(.mini).tint(Ink.blue).accessibilityLabel("In progress")
+                ProgressView().controlSize(.mini).tint(Ink.silver).accessibilityLabel("In progress")
             }
         case .completed, .failed, .needsInput, .waiting:
             Image(systemName: event.lifecycle.symbol).font(.system(size: 12, weight: .semibold))
@@ -190,8 +188,11 @@ struct ActivityCapsule: View {
             if let request = record.actionableRequest() {
                 PermissionPrompt(model: model, record: record, request: request)
             }
+            if event.agent != nil {
+                AgentSessionDetail(model: model, record: record, twoColumns: SurfaceLayout.agentTwoColumns(model))
+            }
             if let progress = event.progress, !event.lifecycle.terminal {
-                ProgressLine(value: progress, tone: .blue)
+                ProgressLine(value: progress, tone: .silver)
             }
             if let summary = event.summary, !summary.isEmpty {
                 Text(summary).font(TypeScale.body).foregroundStyle(Ink.primary.opacity(0.92))
@@ -205,7 +206,7 @@ struct ActivityCapsule: View {
                 }
                 if event.actionURL != nil {
                     Button { model.openAction(record) } label: { Label(model.actionTitle(record), systemImage: event.kind == .download ? "folder" : "arrow.up.forward") }
-                        .buttonStyle(PillButtonStyle(prominent: true, tone: event.lifecycle == .failed ? .coral : .iris))
+                        .buttonStyle(PillButtonStyle(prominent: true, tone: event.lifecycle == .failed ? .red : .accent))
                 }
                 if !event.lifecycle.terminal {
                     Button("Snooze 10 min") { model.snooze(record) }.buttonStyle(PillButtonStyle())
@@ -215,7 +216,7 @@ struct ActivityCapsule: View {
                 }
                 Spacer(minLength: 0)
                 Button { model.togglePin(record) } label: { Image(systemName: record.isPinned ? "pin.slash" : "pin") }
-                    .buttonStyle(IconButtonStyle(size: 26, tint: record.isPinned ? Ink.iris : Ink.secondary))
+                    .buttonStyle(IconButtonStyle(size: 26, tint: record.isPinned ? Ink.primary : Ink.secondary))
                     .help(record.isPinned ? "Unpin" : "Pin to the stack").accessibilityLabel(record.isPinned ? "Unpin" : "Pin")
                 Button { model.hideFromStack(record) } label: { Image(systemName: "eye.slash") }
                     .buttonStyle(IconButtonStyle(size: 26, tint: Ink.secondary))
@@ -225,6 +226,70 @@ struct ActivityCapsule: View {
             .frame(height: 26)
         }
         .padding(.horizontal, 12).padding(.bottom, 12)
+    }
+}
+
+/// An agent session opened up: what it did recently (left) and what it is (right). Two columns when
+/// the surface is wide enough, one otherwise. Only what the hooks report; nothing is inferred.
+private struct AgentSessionDetail: View {
+    @ObservedObject var model: AppModel
+    let record: ActivityRecord
+    let twoColumns: Bool
+    var body: some View {
+        let steps = model.agentSteps[record.id] ?? []
+        let facts = SurfaceLayout.agentFacts(record, model: model)
+        let layout = twoColumns ? AnyLayout(HStackLayout(alignment: .top, spacing: 16)) : AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+        layout {
+            column("Recent") {
+                if steps.isEmpty {
+                    row(Text("No steps yet").foregroundStyle(Ink.secondary), trailing: nil)
+                }
+                ForEach(steps) { step in
+                    row(HStack(spacing: 6) {
+                        Circle().fill(step.tone.color).frame(width: 5, height: 5)
+                        Text(step.label).foregroundStyle(Ink.primary)
+                    }, trailing: step.date.formatted(date: .omitted, time: .shortened))
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            column("Session") {
+                ForEach(facts, id: \.0) { fact in
+                    row(Text(fact.1).foregroundStyle(Ink.primary), label: fact.0)
+                }
+            }
+        }
+        .animation(Motion.quick, value: steps.map(\.id))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func column(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title.uppercased()).font(.system(size: 9.5, weight: .semibold)).tracking(0.6).foregroundStyle(Ink.muted)
+                .frame(height: Metrics.agentColumnTitle, alignment: .topLeading)
+                .accessibilityAddTraits(.isHeader)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func row(_ content: some View, trailing: String?) -> some View {
+        HStack(spacing: 6) {
+            content.lineLimit(1)
+            Spacer(minLength: 4)
+            if let trailing { Text(trailing).foregroundStyle(Ink.muted).monospacedDigit() }
+        }
+        .font(TypeScale.secondary)
+        .frame(height: Metrics.agentRow)
+    }
+
+    private func row(_ content: some View, label: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label).foregroundStyle(Ink.secondary).frame(width: 74, alignment: .leading)
+            content.lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 0)
+        }
+        .font(TypeScale.secondary)
+        .frame(height: Metrics.agentRow)
     }
 }
 
@@ -262,7 +327,7 @@ private struct PermissionPrompt: View {
                 Button {
                     if confirming { model.answer(record, .allow) } else { confirming = true }
                 } label: { Text(confirming ? "Confirm allow" : "Allow once").contentTransition(.opacity) }
-                    .buttonStyle(PillButtonStyle(prominent: true, tone: confirming ? .mint : .iris))
+                    .buttonStyle(PillButtonStyle(prominent: true, tone: confirming ? .green : .accent))
                     .help(confirming ? "Allows this one request" : "Press again to confirm")
                 Button("Deny") { model.answer(record, .deny) }.buttonStyle(PillButtonStyle())
                 Spacer(minLength: 0)
@@ -311,7 +376,7 @@ struct TimerStrip: View {
     @Environment(\.nookNamespace) private var namespace
     var body: some View {
         HStack(spacing: 10) {
-            ToneGlyph(symbol: "timer", tone: .iris, size: 26).nookMatched("timer-glyph", in: namespace)
+            ToneGlyph(symbol: "timer", tone: .silver, size: 26).nookMatched("timer-glyph", in: namespace)
             if model.countdown.exists {
                 Text(model.timerLabel(at: clock.now))
                     .font(.system(size: 17, weight: .semibold, design: .rounded).monospacedDigit())
