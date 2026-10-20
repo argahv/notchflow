@@ -110,6 +110,15 @@ import Combine
     }
     enum Command: String { case toggle = "playpause", next = "next track", previous = "previous track" }
 
+    /// Moves playback to a fraction of the current track (both players accept `player position` in seconds).
+    func seek(to fraction: Double) {
+        guard isRunning, duration > 0 else { return }
+        let seconds = max(0, min(duration - 0.5, fraction * duration))
+        _ = script("set player position to \(String(format: "%.2f", seconds))")
+        elapsed = seconds
+        if poll != nil { refresh() }
+    }
+
     func openPlayer() {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
             error = "\(player) isn't installed."; return

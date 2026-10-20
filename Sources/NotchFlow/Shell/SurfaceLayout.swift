@@ -9,13 +9,19 @@ enum Metrics {
     static let dockWing = 146.0
     static let workspaceWidth = 500.0
     static let glanceHeight = 64.0
+    static let stackLayer = 5.0
+    static let codeLine = 15.0
+    static let agentRow = 19.0
+    static let agentColumnTitle = 16.0
+    static let sectionHeader = 16.0
+    static let filterBar = 26.0
     static let pad = 14.0
     static let gap = 8.0
     static let header = 28.0
     static let emptyRow = 58.0
     static let activityRow = 52.0
     static let timerStrip = 40.0
-    static let tile = 68.0
+    static let tile = 60.0
     static let noteRow = 48.0
     static let searchField = 30.0
     static let todoRow = 30.0
@@ -30,6 +36,11 @@ enum Metrics {
     static let sectionLabel = 20.0
     static let appTile = 72.0
     static let appsPerRow = 5
+    static let tilesPerRow = 5
+    static let clipRow = 40.0
+    static let maxClipRows = 6
+    static let deviceRow = 34.0
+    static let metricRow = 28.0
     static let filesPerRow = 5
     static let maxNoteRows = 5
     static let maxTodoRows = 8
@@ -42,10 +53,11 @@ enum Metrics {
     static func form(for snapshot: PresentationSnapshot, model: AppModel, previous: SurfaceForm?) -> SurfaceForm {
         let display = model.geometry
         let prior = previous.map { SurfaceSize(width: Double($0.size.width), height: Double($0.size.height)) }
-        func resolve(_ contract: SizeContract, wing: Double, ear: CGFloat, corner: CGFloat) -> SurfaceForm {
+        func resolve(_ contract: SizeContract, wing: Double, ear: CGFloat, corner: CGFloat, inset: CGFloat = 0) -> SurfaceForm {
             let size = SurfaceGeometryEngine.resolve(contract, display: display, wing: wing, previous: prior)
-            return SurfaceForm(size: CGSize(width: size.width, height: size.height), ear: ear, corner: corner)
+            return SurfaceForm(size: CGSize(width: size.width, height: size.height), ear: ear, corner: corner, inset: inset)
         }
+        let hardware = CGFloat(display.notchCorner)
         switch snapshot.interaction.presentation {
         case .collapsed:
             if snapshot.interaction.awareness == .drag {
@@ -56,14 +68,18 @@ enum Metrics {
             let status = model.hasBandStatus
             let aware = snapshot.interaction.awareness == .pointer
             let wing = status ? Metrics.statusWing : 0
-            // With nothing to show, the resting surface hides entirely behind the hardware notch.
+            // With nothing to show, the surface is the hardware notch, drawn a point inside it so it
+            // disappears into the housing. Hover stretches the lower edge slightly; a status widens it.
             return resolve(.content(width: display.notchWidth + 2 * wing + (aware ? 16 : 0), height: aware ? 5 : 0, maxHeight: 40),
-                           wing: wing, ear: status || aware ? 6 : 2, corner: status || aware ? 12 : 9)
+                           wing: wing, ear: status || aware ? 6 : 3, corner: status || aware ? hardware + 3 : hardware,
+                           inset: status || aware ? 0 : 1)
         case .preview:
-            return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing, height: Metrics.glanceHeight),
+            let depth = Double(model.glanceStackDepth)
+            return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing,
+                                    height: Metrics.glanceHeight + (depth > 0 ? Metrics.stackLayer * depth + 4 : 0)),
                            wing: Metrics.glanceWing, ear: 10, corner: 22)
         case .expanded:
-            let width = max(Metrics.workspaceWidth, display.notchWidth + 2 * Metrics.dockWing)
+            let width = workspaceWidth(display)
             return resolve(.content(width: width, height: workspaceHeight(snapshot, model), minHeight: 56, maxHeight: 420),
                            wing: Metrics.dockWing, ear: 14, corner: 28)
         }
@@ -79,10 +95,12 @@ enum Metrics {
         let pad = Metrics.pad
         switch snapshot.route {
         case .activity(let detail):
-            let rows = model.displayedActivities(detail: detail)
-            var height = 10.0
+            let sections = model.activitySections(detail: detail)
+            let rows = sections.flatMap(\.rows)
+            var height = 10.0 + Metrics.filterBar + Metrics.gap
             height += rows.isEmpty ? Metrics.emptyRow : stack(rows.count, Metrics.activityRow)
-            if let detail, let record = rows.first(where: { $0.id == detail }) { height += detailHeight(record) }
+            height += Double(sections.filter { $0.title != nil }.count) * (Metrics.sectionHeader + Metrics.gap)
+            if let detail, let record = rows.first(where: { $0.id == detail }) { height += detailHeight(record, model: model) }
             return height + 12 + Metrics.timerStrip + pad
         case .music:
             return pad + (model.preferences.mediaEnabled ? 64 + (model.media.error == nil ? 0 : 20) : Metrics.emptyRow) + pad
@@ -99,7 +117,7 @@ enum Metrics {
             if model.shelf.removed != nil || model.shelf.error != nil { height += Metrics.gap + 26 }
             return height + pad
         case .tools(nil):
-            return pad + stack(2, Metrics.tile) + pad
+            return pad + stack((Tool.allCases.count + Metrics.tilesPerRow - 1) / Metrics.tilesPerRow, Metrics.tile) + pad
         case .tools(let tool?):
             return pad + Metrics.header + 10 + toolHeight(tool, snapshot, model) + pad
         case .history(let detail):
@@ -144,14 +162,61 @@ enum Metrics {
             return 84
         case .shortcuts:
             return 88
+        case .clipboard:
+            guard model.clipboard.enabled else { return Metrics.emptyRow + Metrics.gap + 26 }
+            let count = model.clipboard.items.count
+            let list = count == 0 ? 40 : stack(min(count, Metrics.maxClipRows), Metrics.clipRow, gap: 4)
+            return list + (model.clipboard.skipped > 0 || count > 0 ? Metrics.gap + 20 : 0)
+        case .sound:
+            return stack(max(1, min(model.audioOutputs.count, 6)), Metrics.deviceRow, gap: 4)
+        case .system:
+            return stack(4, Metrics.metricRow, gap: 4)
         }
     }
 
     /// Inline detail under an activity or history row: summary (up to four lines) and actions.
-    static func detailHeight(_ record: ActivityRecord) -> Double {
+    static func detailHeight(_ record: ActivityRecord, model: AppModel? = nil) -> Double {
         let summary = record.event.summary ?? ""
         let lines = summary.isEmpty ? 0 : min(4, Int((Double(summary.count) / 62).rounded(.up)))
-        return Double(lines) * 16 + 10 + 26 + 12
+        let request = record.actionableRequest().map { requestHeight($0) + 10 } ?? 0
+        var agent = 0.0
+        if record.event.agent != nil, let model {
+            let steps = Double(max(1, model.agentSteps[record.id]?.count ?? 0))
+            let facts = Double(agentFacts(record, model: model).count)
+            let column = { (rows: Double) in Metrics.agentColumnTitle + rows * Metrics.agentRow }
+            agent = (agentTwoColumns(model) ? max(column(steps), column(facts)) : column(steps) + 10 + column(facts)) + 10
+        }
+        return request + agent + Double(lines) * 16 + 10 + 26 + 12
+    }
+
+    /// Two columns once the workspace leaves room for both (about 200 pt each).
+    @MainActor static func agentTwoColumns(_ model: AppModel) -> Bool { workspaceWidth(model.geometry) >= 480 }
+
+    /// The open workspace's width on this display (the same rule the expanded form uses).
+    static func workspaceWidth(_ display: DisplayGeometry) -> Double {
+        min(max(Metrics.workspaceWidth, display.notchWidth + 2 * Metrics.dockWing), display.width - 2 * SurfaceGeometryEngine.screenMargin)
+    }
+
+    /// What a session is, from fields its hook events carry.
+    @MainActor static func agentFacts(_ record: ActivityRecord, model: AppModel) -> [(String, String)] {
+        let event = record.event
+        var facts: [(String, String)] = []
+        if let project = event.project { facts.append(("Project", project)) }
+        if let branch = event.branch { facts.append(("Branch", branch)) }
+        if let repository = event.agent?.repository { facts.append(("Repository", repository)) }
+        if let host = model.host(for: record) { facts.append(("App", host.name)) }
+        if let first = record.firstSeen { facts.append(("Started", first.formatted(date: .omitted, time: .shortened))) }
+        return facts
+    }
+
+    /// The permission prompt: header, the command or path being authorized, and the answers.
+    static func requestHeight(_ request: ActivityRequest) -> Double {
+        let lines = requestLines(request.detail)
+        return 10 + 18 + 8 + (lines > 0 ? Double(lines) * Metrics.codeLine + 16 + 8 : 0) + 26 + 10
+    }
+    static func requestLines(_ detail: String?) -> Int {
+        guard let detail, !detail.isEmpty else { return 0 }
+        return min(3, Int((Double(detail.count) / 56).rounded(.up)))
     }
 
     /// The note editor grows two lines at a time, between a compact and a focused height; beyond

@@ -126,12 +126,20 @@ import Carbon
         guard let screen else { panel.orderOut(nil); return }
         let frame = screen.frame
         let realNotch = screen.safeAreaInsets.top > 0
-        let notchWidth: CGFloat
+        var notchWidth = CGFloat(model.preferences.notchWidth)
+        var notchCenter: Double?
         if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea, realNotch {
+            // The hardware notch is exactly the gap between the two menu-bar areas. AppKit doesn't
+            // say whether these rects are global or screen-local; read them whichever way places them
+            // on this screen, and trust the result only near the midpoint, where Apple puts the notch.
             notchWidth = max(100, right.minX - left.maxX)
-        } else { notchWidth = model.preferences.notchWidth }
+            let global = left.minX >= frame.minX - 1 && right.maxX <= frame.maxX + 1
+            let center = (left.maxX + right.minX) / 2 + (global ? 0 : frame.minX)
+            if abs(center - frame.midX) <= 40 { notchCenter = Double(center) }
+        }
         let measured = DisplayGeometry(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height,
-                                       notchWidth: notchWidth, notchHeight: max(30, screen.safeAreaInsets.top))
+                                       notchWidth: notchWidth, notchHeight: max(30, screen.safeAreaInsets.top),
+                                       notchCenterX: notchCenter)
         if model.geometry != measured { model.geometry = measured }
         guard model.preferences.overlayEnabled, realNotch || model.preferences.simulatedNotch else {
             panel.orderOut(nil); model.backdrop.stop(); return
@@ -158,6 +166,29 @@ import Carbon
         host?.layoutSubtreeIfNeeded()
     }
     func beginTransition() -> Int { transitions += 1; return transitions }
+    func isLatest(_ transition: Int) -> Bool { transition == transitions }
+
+    #if DEBUG
+    /// Scripted QA: renders the live overlay offscreen at its current form, on a backdrop that
+    /// stands in for the menu bar and desktop. Works while the display sleeps. Native blur isn't
+    /// captured by ImageRenderer, so this checks layout, colour and shape, not translucency.
+    func snapshot(to url: URL, light: Bool) {
+        let size = model.form.size
+        let canvas = CGSize(width: max(size.width + 120, 640), height: size.height + 80)
+        let view = ZStack(alignment: .top) {
+            Color(white: light ? 0.93 : 0.16)
+            Color(white: light ? 0.84 : 0.08).frame(height: model.geometry.band)
+            OverlayView(model: model).environmentObject(model.preferences).modelContainer(container)
+                .frame(width: size.width, height: size.height)
+        }
+        .frame(width: canvas.width, height: canvas.height, alignment: .top)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 2
+        guard let image = renderer.cgImage,
+              let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return }
+        try? data.write(to: url)
+    }
+    #endif
     /// After the latest transition settles, trim the panel back to the silhouette.
     func settle(_ transition: Int) {
         guard transition == transitions, panel.isVisible, !suspended else { return }
@@ -172,9 +203,10 @@ import Carbon
     }
     /// Only explicit actions call this; passive notifications never take focus.
     func focus() { panel.makeKey(); panel.makeFirstResponder(host) }
-    func close() {
+    /// `restoringFocus: false` when the action that closes the workspace brings another app forward.
+    func close(restoringFocus: Bool = true) {
         model.send(.dismiss); panel.resignKey()
-        if let previousApp, previousApp.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+        if restoringFocus, let previousApp, previousApp.processIdentifier != ProcessInfo.processInfo.processIdentifier {
             previousApp.activate(options: [])
         }
         previousApp = nil
@@ -204,7 +236,7 @@ import Carbon
 
     private var notchRect: NSRect {
         let g = model.geometry
-        return NSRect(x: g.x + (g.width - g.notchWidth) / 2, y: g.y + g.height - g.notchHeight,
+        return NSRect(x: g.anchorX - g.notchWidth / 2, y: g.y + g.height - g.notchHeight,
                       width: g.notchWidth, height: g.notchHeight)
     }
 

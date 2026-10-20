@@ -25,10 +25,13 @@ enum Feature: String, CaseIterable, Identifiable {
 }
 
 enum Tool: String, CaseIterable, Identifiable {
-    case notes, todos, calendar, mirror, apps, timer, shortcuts
+    case notes, todos, clipboard, calendar, timer, apps, sound, system, mirror, shortcuts
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .clipboard: "Clipboard"
+        case .sound: "Sound"
+        case .system: "System"
         case .notes: "Notes"
         case .todos: "To-dos"
         case .calendar: "Calendar"
@@ -40,6 +43,9 @@ enum Tool: String, CaseIterable, Identifiable {
     }
     var symbol: String {
         switch self {
+        case .clipboard: "doc.on.clipboard"
+        case .sound: "speaker.wave.2"
+        case .system: "gauge.with.dots.needle.33percent"
         case .notes: "note.text"
         case .todos: "checklist"
         case .calendar: "calendar"
@@ -103,6 +109,8 @@ struct SurfaceForm: Equatable {
     var size: CGSize
     var ear: CGFloat
     var corner: CGFloat
+    /// Non-zero only at rest with nothing to show: the shape tucks just inside the hardware notch.
+    var inset: CGFloat = 0
 }
 
 /// Everything that decides the surface's geometry, so the next size can be computed before any

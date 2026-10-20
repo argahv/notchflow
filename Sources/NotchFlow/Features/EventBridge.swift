@@ -27,6 +27,7 @@ import Darwin
         do {
             let urls = try FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)
                 .filter { $0.pathExtension == "json" }.prefix(500)
+            var accepted: [ActivityEvent] = []
             for url in urls {
                 do {
                     let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
@@ -37,7 +38,7 @@ import Darwin
                     }
                     let data = try Data(contentsOf: url)
                     let event = try ActivityEvent.decoder().decode(ActivityEvent.self, from: data)
-                    try event.validate(); onEvent?(event)
+                    try event.validate(); accepted.append(event)
                     try FileManager.default.removeItem(at: url)
                 } catch {
                     // Move invalid events out of the hot path; never retry forever.
@@ -46,6 +47,8 @@ import Darwin
                     onError?("Rejected activity: \(error.localizedDescription)")
                 }
             }
+            // A directory listing has no order; a burst (tool started, tool finished) applies oldest first.
+            for event in accepted.sorted(by: { $0.timestamp < $1.timestamp }) { onEvent?(event) }
             // Rejected payloads are intentionally not retained indefinitely.
             let rejected = try FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: [.contentModificationDateKey])
                 .filter { $0.pathExtension == "rejected" }

@@ -48,12 +48,22 @@ public struct InteractionState: Equatable, Sendable {
 public struct DisplayGeometry: Equatable, Sendable {
     public var x: Double, y: Double, width: Double, height: Double
     public var notchWidth: Double, notchHeight: Double
+    /// Horizontal centre of the hardware notch in screen coordinates, measured from the menu-bar
+    /// areas on either side of it. Nil for a simulated notch, which sits at the screen's midpoint.
+    public var notchCenterX: Double?
     public init(x: Double, y: Double, width: Double, height: Double,
-                notchWidth: Double = 180, notchHeight: Double = 32) {
+                notchWidth: Double = 180, notchHeight: Double = 32, notchCenterX: Double? = nil) {
         self.x = x; self.y = y; self.width = width; self.height = height
-        self.notchWidth = notchWidth; self.notchHeight = notchHeight
+        self.notchWidth = notchWidth; self.notchHeight = notchHeight; self.notchCenterX = notchCenterX
     }
+    /// Where every surface is anchored: the notch, not the screen.
+    public var anchorX: Double { notchCenterX ?? (x + width / 2) }
+    /// The hardware notch's lower corner radius. macOS doesn't report it; this tracks the notch
+    /// height so the resting surface sits inside the housing on every model.
+    public var notchCorner: Double { min(12, max(6, notchHeight * 0.28)) }
+    /// Top-centred on the notch, kept on screen.
     public func origin(panelWidth: Double, panelHeight: Double) -> (x: Double, y: Double) {
-        (x + (width - panelWidth) / 2, y + height - panelHeight)
+        let left = anchorX - panelWidth / 2
+        return (min(max(left, x), x + width - panelWidth), y + height - panelHeight)
     }
 }

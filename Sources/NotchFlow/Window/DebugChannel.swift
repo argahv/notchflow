@@ -48,6 +48,35 @@ import AppKit
         case "media": model.preferences.mediaEnabled = argument == "on"
         case "reduceMotion": UserDefaults.standard.set(argument == "on", forKey: "NotchFlowReduceMotion")
         case "quiet": model.preferences.quietMode = argument == "on"
+        case "filter": if let filter = AppModel.ActivityFilter(rawValue: argument) { model.setFilter(filter) }
+        case "hide": if let record = model.record(argument) { model.hideFromStack(record) }
+        case "pinRecord": if let record = model.record(argument) { model.togglePin(record) }
+        case "clip":
+            // "clip:<text>" or "clip:1password:<text>" (as if copied in a password manager).
+            if argument.hasPrefix("1password:") {
+                model.clipboard.consider(String(argument.dropFirst(10)), types: [], app: "com.1password.1password", appName: "1Password")
+            } else if argument.hasPrefix("concealed:") {
+                model.clipboard.consider(String(argument.dropFirst(10)), types: ["org.nspasteboard.ConcealedType"], app: nil, appName: nil)
+            } else {
+                model.clipboard.consider(argument.replacingOccurrences(of: "\\n", with: "\n"), types: [], app: "com.apple.dt.Xcode", appName: "Xcode")
+            }
+        case "snapshot":
+            // "snapshot:<name>" or "snapshot:<name>:light"
+            let parts = argument.split(separator: ":").map(String.init)
+            if let name = parts.first, name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) {
+                windows.snapshot(to: AppFiles.root.appendingPathComponent("debug/\(name).png"), light: parts.dropFirst().first == "light")
+            }
+        case "status":
+            let lines = model.providers.statuses.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.label)" }
+                + ["context: \(model.contextBoost.map(\.rawValue).sorted().joined(separator: ","))",
+                   "mode: \(model.preferences.mode?.title ?? "Custom")"]
+            try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)
+        case "dumpHooks":
+            let folder = AppFiles.root.appendingPathComponent("debug", isDirectory: true)
+            for (name, text) in [("claude.json", HookSetup.claude(wait: 25)), ("codex.json", HookSetup.codex(wait: 25)), ("notify.toml", HookSetup.codexNotify)] {
+                try? text?.write(to: folder.appendingPathComponent("hooks-" + name), atomically: true, encoding: .utf8)
+            }
+        case "allow", "deny": if let record = model.record(argument) { model.answer(record, verb == "allow" ? .allow : .deny) }
         default: NSLog("NotchFlow debug: unknown command %@", command)
         }
     }

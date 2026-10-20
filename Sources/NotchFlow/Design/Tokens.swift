@@ -7,38 +7,46 @@ extension Color {
     }
 }
 
-/// Obsidian Liquid palette. Colour is functional: iris marks interaction and selection, mint success
-/// and live status, amber waiting, coral genuine failure, blue information. Never decoration.
+/// Obsidian & Silver. Nearly monochrome, like the hardware: black glass, graphite controls, silver
+/// light. Colour only carries meaning: blue for the primary or selected action, green for success,
+/// amber for something waiting on you, red for a genuine failure. Artwork and app icons keep theirs.
 enum Ink {
-    static let void = Color(hex: 0x08090D)
-    static let obsidian = Color(hex: 0x0D0F14)
-    static let surface = Color(hex: 0x15171E)
-    static let elevated = Color(hex: 0x1D2029)
-    static let hover = Color(hex: 0x282B36)
+    /// Physical Black: the camera housing and the resting notch.
+    static let void = Color(hex: 0x000000)
+    /// The expanded surface.
+    static let obsidian = Color(hex: 0x08090B)
+    /// Carbon: inner backgrounds.
+    static let surface = Color(hex: 0x111317)
+    /// Graphite: controls and selected items.
+    static let elevated = Color(hex: 0x202329)
+    static let hover = Color(hex: 0x2A2E35)
+    /// Titanium: separators and secondary surfaces.
+    static let titanium = Color(hex: 0x525760)
+    /// Silver: reflective highlights and neutral glyphs.
+    static let silver = Color(hex: 0xC8CDD4)
 
-    static let primary = Color(hex: 0xF2F2F7)
-    /// Metadata and secondary labels; ≈7:1 on `surface`. `muted` (≈4:1) is for glyphs and inactive chrome only.
-    static let secondary = Color(hex: 0xA0A3B1)
-    static let muted = Color(hex: 0x707481)
-    static let disabled = Color(hex: 0x555965)
+    /// Ice White.
+    static let primary = Color(hex: 0xF4F5F7)
+    /// Muted Silver: metadata and secondary labels (≈6:1 on Carbon). `muted` (≈3.9:1) is for glyphs only.
+    static let secondary = Color(hex: 0x9298A2)
+    static let muted = Color(hex: 0x6E747E)
+    static let disabled = Color(hex: 0x4A4F57)
 
-    static let iris = Color(hex: 0xA99BFF)
-    static let lavender = Color(hex: 0xC5BAFF)
-    static let mint = Color(hex: 0x73E0BD)
-    static let amber = Color(hex: 0xFFBE76)
-    static let coral = Color(hex: 0xFF858F)
-    static let blue = Color(hex: 0x82B8FF)
+    static let accent = Color(hex: 0x0A84FF)
+    static let green = Color(hex: 0x30D158)
+    static let amber = Color(hex: 0xFFB340)
+    static let red = Color(hex: 0xFF453A)
 }
 
 enum Tone: Equatable {
-    case iris, mint, amber, coral, blue, neutral
+    case accent, silver, green, amber, red, neutral
     var color: Color {
         switch self {
-        case .iris: Ink.iris
-        case .mint: Ink.mint
+        case .accent: Ink.accent
+        case .silver: Ink.silver
+        case .green: Ink.green
         case .amber: Ink.amber
-        case .coral: Ink.coral
-        case .blue: Ink.blue
+        case .red: Ink.red
         case .neutral: Ink.secondary
         }
     }
@@ -71,10 +79,10 @@ extension ActivityPhase {
     var tone: Tone {
         switch self {
         case .waiting: .amber
-        case .failed: .coral
-        case .completed: .mint
+        case .failed: .red
+        case .completed: .green
         case .cancelled: .neutral
-        case .started, .progress: .blue
+        case .started, .progress: .silver
         }
     }
     var symbol: String {
@@ -89,20 +97,71 @@ extension ActivityPhase {
     var label: String { rawValue.capitalized }
 }
 
+extension ActivityState {
+    var tone: Tone {
+        switch self {
+        case .needsInput, .waiting: .amber
+        case .failed: .red
+        case .completed: .green
+        case .running, .starting: .silver
+        case .queued, .paused, .cancelled, .unknown: .neutral
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .needsInput: "hand.raised.fill"
+        case .waiting: "ellipsis.bubble.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        case .completed: "checkmark.circle.fill"
+        case .cancelled: "minus.circle"
+        case .paused: "pause.circle"
+        case .queued: "clock"
+        case .running, .starting, .unknown: "circle.dotted"
+        }
+    }
+    var label: String {
+        switch self {
+        case .needsInput: "Needs input"
+        case .waiting: "Waiting"
+        case .failed: "Failed"
+        case .completed: "Completed"
+        case .cancelled: "Cancelled"
+        case .paused: "Paused"
+        case .queued: "Queued"
+        case .starting: "Starting"
+        case .running: "Running"
+        case .unknown: "Unknown"
+        }
+    }
+}
+
 extension AttentionPriority {
     var tone: Tone {
         switch self {
-        case .critical: .coral
+        case .critical: .red
         case .actionRequired: .amber
-        case .informational: .mint
-        case .background: .blue
+        case .informational: .green
+        case .background: .silver
         case .silent: .neutral
         }
     }
 }
 
-/// A recognizable glyph for an event publisher, from its free-form source name.
+/// A recognizable glyph for an event: its declared category first, then its free-form source name.
 enum SourceGlyph {
+    static func symbol(for event: ActivityEvent) -> String {
+        switch event.category {
+        case .agent: "sparkles"
+        case .ci: "arrow.triangle.branch"
+        case .build: "hammer"
+        case .deploy: "shippingbox"
+        case .download: "arrow.down.circle"
+        case .timer: "timer"
+        case .meeting: "video"
+        case .system: "gearshape"
+        case .task, nil: symbol(for: event.source)
+        }
+    }
     static func symbol(for source: String) -> String {
         let words = Set(source.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init))
         func has(_ candidates: String...) -> Bool { !words.isDisjoint(with: candidates) }
@@ -113,5 +172,38 @@ enum SourceGlyph {
         if has("timer", "focus") { return "timer" }
         if has("terminal", "shell", "zsh", "bash") { return "terminal" }
         return "bolt.horizontal"
+    }
+}
+
+extension AgentState {
+    /// Labels only for what the provider's events justify; "working" follows a submitted prompt.
+    func label(tool: String?) -> String {
+        switch self {
+        case .idle: "Ready"
+        case .starting: "Starting"
+        case .working: "Working"
+        case .executingTool: tool.map { "Running \($0)" } ?? "Running a tool"
+        case .waitingForUser: "Waiting for you"
+        case .awaitingAuthorization: tool.map { "Needs permission · \($0)" } ?? "Needs permission"
+        case .completed: "Finished"
+        case .failed: "Failed"
+        case .disconnected: "Ended"
+        case .unknown: "Unknown"
+        }
+    }
+}
+
+/// One-line descriptions shared by the glance, the stack and History.
+enum ActivityText {
+    static func subtitle(_ record: ActivityRecord) -> String {
+        let event = record.event
+        if let agent = event.agent, let state = agent.state {
+            return [event.project, state.label(tool: agent.tool)].compactMap { $0 }.joined(separator: " · ")
+        }
+        // Downloads, meetings and system notices say what matters in their summary ("4.8 MB so far").
+        if [.download, .meeting, .system].contains(event.kind), let summary = event.summary, !summary.isEmpty {
+            return event.lifecycle.terminal ? "\(summary) · \(event.lifecycle.label)" : summary
+        }
+        return [event.source, event.branch, event.lifecycle.label].compactMap { $0 }.joined(separator: " · ")
     }
 }

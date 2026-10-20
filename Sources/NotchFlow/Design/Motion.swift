@@ -10,14 +10,27 @@ enum Motion {
     }
     /// Low Power Mode keeps every transition but drops nonessential cost: no blur passes, no ambient loops.
     static var lowPower: Bool { ProcessInfo.processInfo.isLowPowerModeEnabled }
-    /// Hover, press, small indicators: ≈90–160 ms.
-    static var micro: Animation { reduced ? .easeOut(duration: 0.1) : .spring(response: 0.18, dampingFraction: 0.9) }
+    /// Button feedback, hover, small indicators: ≈90–150 ms.
+    static var micro: Animation { reduced ? .easeOut(duration: 0.1) : .spring(response: 0.13, dampingFraction: 0.9) }
     /// Toggles and small reveals: ≈150–220 ms.
-    static var quick: Animation { reduced ? .easeOut(duration: 0.14) : .spring(response: 0.26, dampingFraction: 0.9) }
+    static var quick: Animation { reduced ? .easeOut(duration: 0.14) : .spring(response: 0.22, dampingFraction: 0.9) }
     /// The surface itself. Opening settles with a hint of give; closing is faster and never overshoots.
     static func fluid(opening: Bool) -> Animation {
         if reduced { return .easeOut(duration: 0.16) }
-        return opening ? .spring(response: 0.4, dampingFraction: 0.84) : .spring(response: 0.3, dampingFraction: 1)
+        return opening ? .spring(response: 0.34, dampingFraction: 0.86) : .spring(response: 0.28, dampingFraction: 1)
+    }
+    /// The silhouette between presentations, inside the Obsidian & Silver timing ranges:
+    /// hover 100–160 ms, compact 180–260, full expansion 280–420, collapse 220–350. Springs retarget
+    /// from the presented value with its velocity, so a change of mind mid-flight never snaps.
+    static func surface(from: Presentation, to: Presentation, growing: Bool) -> Animation {
+        if reduced { return .easeOut(duration: 0.16) }
+        switch (from, to) {
+        case (.collapsed, .collapsed): return .spring(response: 0.15, dampingFraction: 0.92)          // hover stretch
+        case (_, .collapsed): return .spring(response: 0.28, dampingFraction: 1)                      // collapse
+        case (.collapsed, .preview): return .spring(response: 0.22, dampingFraction: 0.88)            // compact
+        case (_, .expanded) where from != .expanded: return .spring(response: 0.34, dampingFraction: 0.86) // full
+        default: return growing ? .spring(response: 0.26, dampingFraction: 0.9) : .spring(response: 0.24, dampingFraction: 1)
+        }
     }
     /// Absorbing a dropped file or a merging shape: more travel, more give.
     static var expressive: Animation { reduced ? .easeOut(duration: 0.16) : .spring(response: 0.48, dampingFraction: 0.72) }

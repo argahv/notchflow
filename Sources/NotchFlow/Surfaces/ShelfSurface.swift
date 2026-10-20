@@ -62,21 +62,21 @@ struct DropZone: View {
         let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
         HStack(spacing: 10) {
             Image(systemName: active ? "tray.and.arrow.down.fill" : "tray.and.arrow.down")
-                .font(.system(size: 18, weight: .medium)).foregroundStyle(Ink.iris)
+                .font(.system(size: 18, weight: .medium)).foregroundStyle(Ink.silver)
                 .contentTransition(.symbolEffect(.replace))
                 .scaleEffect(active ? 1.08 : 1)
             VStack(alignment: .leading, spacing: 2) {
                 Text(active ? "Release to add to the shelf" : "Drop files here").font(TypeScale.cardTitle)
                 if let choose {
-                    Button("or choose files…", action: choose).font(TypeScale.secondary).foregroundStyle(Ink.iris)
+                    Button("or choose files…", action: choose).font(TypeScale.secondary).foregroundStyle(Ink.silver)
                 }
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(shape.fill(Ink.iris.opacity(active ? 0.14 : 0.06)))
-        .overlay(shape.strokeBorder(Ink.iris.opacity(active ? 0.85 : 0.35), style: StrokeStyle(lineWidth: active ? 1.5 : 1, dash: active ? [] : [4, 3])))
+        .background(shape.fill(Ink.silver.opacity(active ? 0.14 : 0.06)))
+        .overlay(shape.strokeBorder(Ink.silver.opacity(active ? 0.85 : 0.35), style: StrokeStyle(lineWidth: active ? 1.5 : 1, dash: active ? [] : [4, 3])))
         .animation(Motion.quick, value: active)
     }
 }
@@ -105,7 +105,7 @@ private struct FileTile: View {
         }
         .frame(maxWidth: .infinity).frame(height: Metrics.fileTile)
         .nookMaterial(.interactive, radius: 12, hovering: hovering)
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Ink.mint, lineWidth: 1.5).opacity(glow))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Ink.green, lineWidth: 1.5).opacity(glow))
         .overlay(alignment: .topTrailing) {
             Button(action: remove) { Image(systemName: "xmark") }
                 .buttonStyle(IconButtonStyle(size: 18, tint: Ink.secondary))

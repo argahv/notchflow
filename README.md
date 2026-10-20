@@ -43,13 +43,16 @@ Existing activity rows retain their position while the workspace is open. Newly 
 | Area | Included behavior |
 | --- | --- |
 | Overlay | Nonactivating AppKit panel, first-click handling, safe-area geometry, selected display, simulated notch, display-change recovery |
-| Attention | Versioned events, validation, priority, deduplication, out-of-order protection, expiry, snooze, history, explicit task links |
-| Developer tools | Local CLI, command wrapper with heartbeat, Claude Code command-hook adapter |
+| Activity engine | Versioned events (v1 + typed v2 states, categories, agents, requests), validation, ranking, deduplication, out-of-order protection, expiry, snooze, pin, hide, history; dynamic task stack with filters |
+| Agents | Claude Code and Codex hook adapter (tool, waiting, permission states), optional Allow/Deny of permission requests through the documented hook output, Open ‹host app› |
+| Developer tools | Local CLI, command wrapper with heartbeat, GitHub Actions polling (optional Keychain token) |
+| Context and modes | Frontmost-app ranking (never auto-opens), Minimal / Dynamic / Developer presets |
+| Clipboard and downloads | Opt-in memory-only clipboard history with password-manager and secret filtering; Download Center with honest states |
 | Timer | Start/pause/resume/cancel, persisted deadline, one-time completion after sleep/relaunch |
 | Shelf | Security-scoped bookmarks, local file picker/drop, outbound drag, open/reveal, remove and undo, 100-reference cap |
 | Music | Opt-in Music/Spotify AppleScript adapters, title/artist, play/pause/previous/next, progress; polls only while the Music tab is visible |
-| Productivity | SwiftData plain-text scratch note and local to-dos, EventKit events/reminders, camera mirror, quick apps, named Shortcut launcher |
-| System | Internal Mac battery/charging data, configurable login item, sleep/lock cleanup |
+| Productivity | SwiftData plain-text scratch note and local to-dos, EventKit events/reminders, meeting reminders with Join, camera mirror, quick apps, named Shortcut launcher |
+| System | Internal Mac battery/charging data, opt-in low-battery alerts, sound output switching, on-demand CPU/memory/thermal, configurable login item, sleep/lock cleanup |
 | Appearance | Solid Performance, native-material Balanced, experimental Metal/ScreenCaptureKit Ultra; accessibility preferences |
 | Delivery | Checked-in Xcode project, deterministic generator, universal build script, signing/notarization script, CI, tests and manual verification plan |
 
@@ -104,6 +107,8 @@ bash Scripts/build.sh
 - `Scripts`: project generator, event publisher, build and notarization tools.
 
 The app target compiles core sources directly. The package compiles the same core sources for tests, so there is no third-party package resolution or duplicate import in the app target. Regenerate the Xcode project after adding sources with `python3 Scripts/generate_project.py`.
+
+Liquid Workspace 2.0: [implementation progress](docs/implementation/progress.md), [activity engine](docs/architecture/activity-engine.md), [agent integrations](docs/architecture/agent-integrations.md), [context engine](docs/architecture/context-engine.md), [design](docs/design/liquid-workspace.md), [motion](docs/design/motion-system.md), [security](docs/security/integrations.md), [acceptance tests](docs/testing/acceptance-tests.md).
 
 See [architecture and next milestones](docs/ARCHITECTURE.md) and the [Liquid Workspace redesign notes](docs/redesign/00-current-state-audit.md) (design system, window and state, motion, rendering, QA report). Licensing, Sparkle updates, third-party plugin distribution, private media APIs, Bluetooth discovery and system HUD interception are intentionally future work.
 

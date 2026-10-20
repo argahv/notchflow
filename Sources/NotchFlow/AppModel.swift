@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import Combine
+import CoreAudio
 
 /// One-second clock that runs only while something on screen counts down. Views that show time
 /// observe this instead of the model, so the rest of the surface never redraws on a tick.
@@ -37,7 +38,15 @@ struct CommandItem: Identifiable {
     @Published private(set) var interaction = InteractionState()
     @Published private(set) var route: Route = .activity(detail: nil)
     @Published private(set) var openNoteID: UUID?
-    @Published private(set) var form = SurfaceForm(size: CGSize(width: 208, height: 37.5), ear: 2, corner: 9)
+    /// Recent steps per agent session, from the states and tool names hooks already publish. Memory
+    /// only: never written to History, gone when NotchFlow quits.
+    struct AgentStep: Identifiable, Equatable { let id = UUID(); let date: Date; let label: String; let tone: Tone }
+    @Published private(set) var agentSteps: [String: [AgentStep]] = [:]
+    static let agentStepLimit = 6
+
+    /// True while the silhouette is changing shape; the edge catches light, then settles.
+    @Published private(set) var surfaceMoving = false
+    @Published private(set) var form = SurfaceForm(size: CGSize(width: 208, height: 37.5), ear: 3, corner: 10, inset: 1)
     @Published private(set) var glance: GlanceSubject = .summary
     @Published private(set) var illumination: Illumination?
     @Published private(set) var dockBadge: Tone?
@@ -73,6 +82,7 @@ struct CommandItem: Identifiable {
     let battery = BatteryService()
     let backdrop = BackdropService()
     let bridge = EventBridge()
+    lazy var providers = ProviderHub(deliver: { [weak self] event in self?.ingest(event) })
     let shelf = ShelfService()
     var windows: WindowManager?
     var context: ModelContext?
@@ -89,6 +99,13 @@ struct CommandItem: Identifiable {
     private var openedByDrag = false
     private var subscriptions = Set<AnyCancellable>()
     private let queueURL = AppFiles.root.appendingPathComponent("activities.json")
+    let approvals = AgentApprovals()
+    let github = GitHubActionsProvider()
+    let clipboard = ClipboardService()
+    let downloads = DownloadsProvider()
+    private(set) lazy var meetings = MeetingProvider(calendar: calendar)
+    @Published private(set) var audioOutputs: [AudioOutput] = []
+    @Published private(set) var defaultAudioOutput: AudioDeviceID?
 
     init(preferences: Preferences) {
         self.preferences = preferences
@@ -98,14 +115,59 @@ struct CommandItem: Identifiable {
         if let data = UserDefaults.standard.data(forKey: "countdown"),
            let timer = try? JSONDecoder().decode(Countdown.self, from: data) { countdown = timer }
         applyRetention()
-        bridge.onEvent = { [weak self] event in self?.ingest(event) }
-        bridge.onError = { [weak self] error in self?.message = error }
-        if preferences.bridgeEnabled { bridge.start() }
+        let inbox = InboxProvider(bridge: bridge)
+        inbox.onError = { [weak self] error in self?.message = error }
+        providers.register(inbox)
+        providers.setEnabled(inbox.identifier, preferences.bridgeEnabled)
+        github.repositories = preferences.githubRepositories
+        providers.register(github)
+        providers.setEnabled(github.identifier, preferences.githubEnabled)
+        preferences.$githubEnabled.dropFirst().sink { [weak self] enabled in
+            guard let self else { return }
+            self.providers.setEnabled(self.github.identifier, enabled)
+        }.store(in: &subscriptions)
+        preferences.$githubRepositories.dropFirst().sink { [weak self] repositories in
+            self?.github.repositories = repositories
+        }.store(in: &subscriptions)
+        for provider in [downloads, meetings] as [any ActivityProvider] { providers.register(provider) }
+        providers.setEnabled(downloads.identifier, preferences.downloadsEnabled)
+        providers.setEnabled(meetings.identifier, preferences.meetingsEnabled)
+        preferences.$downloadsEnabled.dropFirst().sink { [weak self] enabled in
+            guard let self else { return }
+            self.providers.setEnabled(self.downloads.identifier, enabled)
+        }.store(in: &subscriptions)
+        preferences.$meetingsEnabled.dropFirst().sink { [weak self] enabled in
+            guard let self else { return }
+            self.providers.setEnabled(self.meetings.identifier, enabled)
+        }.store(in: &subscriptions)
+        configureClipboard()
+        preferences.$clipboardEnabled.combineLatest(preferences.$clipboardRetentionHours).dropFirst()
+            .sink { [weak self] _, _ in DispatchQueue.main.async { self?.configureClipboard(); self?.reflow() } }
+            .store(in: &subscriptions)
+        clipboard.$items.map(\.count).removeDuplicates().dropFirst()
+            .sink { [weak self] _ in DispatchQueue.main.async { if self?.route == .tools(.clipboard) { self?.reflow() } } }
+            .store(in: &subscriptions)
+        // Context: the frontmost app reorders the stack. Activation notifications only; no polling.
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
+            .compactMap { $0.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication }
+            .sink { [weak self] app in self?.updateContext(app) }
+            .store(in: &subscriptions)
+        preferences.$contextAware.dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.updateContext(NSWorkspace.shared.frontmostApplication) }
+        }.store(in: &subscriptions)
+        updateContext(NSWorkspace.shared.frontmostApplication)
+        battery.$percent.combineLatest(battery.$charging).scan((Int?.none, Int?.none, false)) { state, next in (state.1, next.0, next.1) }
+            .sink { [weak self] previous, current, charging in self?.batteryChanged(from: previous, to: current, charging: charging) }
+            .store(in: &subscriptions)
         clock.onTick = { [weak self] date in self?.tick(date) }
         clock.run(countdown.running)
         preferences.$bridgeEnabled.dropFirst().sink { [weak self] enabled in
-            if enabled { self?.bridge.start() } else { self?.bridge.stop() }
+            self?.providers.setEnabled("inbox", enabled)
         }.store(in: &subscriptions)
+        approvals.sync(enabled: preferences.agentApprovals, wait: preferences.approvalWait)
+        preferences.$agentApprovals.combineLatest(preferences.$approvalWait).dropFirst()
+            .sink { [weak self] enabled, wait in self?.approvals.sync(enabled: enabled, wait: wait) }
+            .store(in: &subscriptions)
         preferences.$privacy.dropFirst().sink { [weak self] privateMode in
             DispatchQueue.main.async { if privateMode { self?.send(.endEditing) }; self?.reflow() }
         }.store(in: &subscriptions)
@@ -125,7 +187,7 @@ struct CommandItem: Identifiable {
             .store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.synchronizeServices(); self?.objectWillChange.send() }
+            .sink { [weak self] _ in self?.synchronizeServices(); self?.configureClipboard(); self?.objectWillChange.send() }
             .store(in: &subscriptions)
         scheduleExpiryRefresh()
     }
@@ -133,13 +195,25 @@ struct CommandItem: Identifiable {
     // MARK: Derived content
 
     var visibleActivities: [ActivityRecord] { queue.visible(now: Date()) }
+    /// Live work in presentation order (see `ActivityRanking`).
+    var rankedActivities: [ActivityRecord] { ActivityRanking.rank(visibleActivities, context: rankingContext) }
+    var rankingContext: RankingContext { RankingContext(now: Date(), boosted: contextBoost) }
+    /// Categories the current context makes more relevant (set by the context engine).
+    @Published var contextBoost: Set<ActivityCategory> = []
     var workspaceActivities: [ActivityRecord] {
         // Rows keep their place while the workspace is open, including a task that just finished.
         workspaceActivityIDs.compactMap { id in queue.records.first(where: { $0.id == id }) }
     }
-    /// Workspace rows plus the record a notification opened, which may already be terminal.
+    /// The open stack under the current filter, plus the record a notification opened (which may
+    /// already be finished).
     func displayedActivities(detail: String?) -> [ActivityRecord] {
-        var rows = workspaceActivities
+        var rows: [ActivityRecord]
+        if activityFilter == .done {
+            let since = Date().addingTimeInterval(-86_400)
+            rows = Array(queue.records.filter { $0.event.lifecycle.terminal && $0.event.timestamp > since }.prefix(8))
+        } else {
+            rows = workspaceActivities.filter { activityFilter.includes($0.event.kind) }
+        }
         if let detail, !rows.contains(where: { $0.id == detail }), let record = queue.records.first(where: { $0.id == detail }) {
             rows.insert(record, at: 0)
         }
@@ -147,16 +221,59 @@ struct CommandItem: Identifiable {
     }
     func record(_ id: String) -> ActivityRecord? { queue.records.first(where: { $0.id == id }) }
 
-    enum LeadingStatus: Equatable { case privacy, activity(ActivityRecord), music }
+    struct ActivitySection: Identifiable { let id: String; let title: String?; let rows: [ActivityRecord] }
+    /// Agents group by project once more than one project has sessions; projects keep the order of
+    /// their most urgent session. Everything else is one untitled section.
+    func activitySections(detail: String?) -> [ActivitySection] {
+        let rows = displayedActivities(detail: detail)
+        guard activityFilter == .agents else { return [ActivitySection(id: "all", title: nil, rows: rows)] }
+        var order: [String] = [], groups: [String: [ActivityRecord]] = [:]
+        for row in rows {
+            let project = row.event.project ?? "Other"
+            if groups[project] == nil { order.append(project) }
+            groups[project, default: []].append(row)
+        }
+        guard order.count > 1 else { return [ActivitySection(id: "all", title: nil, rows: rows)] }
+        return order.map { ActivitySection(id: "project-" + $0, title: $0, rows: groups[$0] ?? []) }
+    }
+
+    enum ActivityFilter: String, CaseIterable, Identifiable {
+        case all, agents, pipelines, downloads, done
+        var id: String { rawValue }
+        var title: String {
+            switch self { case .all: "All"; case .agents: "Agents"; case .pipelines: "CI"; case .downloads: "Downloads"; case .done: "Done" }
+        }
+        func includes(_ category: ActivityCategory) -> Bool {
+            switch self {
+            case .all, .done: true
+            case .agents: category == .agent
+            case .pipelines: [.ci, .build, .deploy].contains(category)
+            case .downloads: category == .download
+            }
+        }
+    }
+    @Published private(set) var activityFilter: ActivityFilter = .all
+    /// Bumps when a finished task retracts into History, so History's dock item can acknowledge it.
+    @Published private(set) var historyPulse: UUID?
+    private var retractions: [String: DispatchWorkItem] = [:]
+
+    func setFilter(_ filter: ActivityFilter) {
+        guard filter != activityFilter else { return }
+        commit(snapshot, animation: Motion.quick, also: { self.activityFilter = filter })
+    }
+
+    /// Several live tasks share the band as one stacked indicator instead of competing for it.
+    enum LeadingStatus: Equatable { case privacy, activities(top: ActivityRecord, tones: [Tone], count: Int), music }
     enum TrailingStatus: Equatable { case timer, battery(Int) }
     var leadingStatus: LeadingStatus? {
         if preferences.privacy { return .privacy }
-        let visible = visibleActivities
-        if let waiting = visible.first(where: { $0.event.phase == .waiting }) { return .activity(waiting) }
+        let ranked = rankedActivities
+        let stack = ranked.first.map { LeadingStatus.activities(top: $0, tones: ranked.prefix(3).map(\.event.lifecycle.tone), count: ranked.count) }
+        if let top = ranked.first, ActivityRanking.score(top, context: rankingContext) >= 600 { return stack }
         if preferences.mediaEnabled && media.playing { return .music }
-        if let running = visible.first { return .activity(running) }
-        return nil
+        return stack
     }
+    var stackCount: Int { rankedActivities.count }
     var trailingStatus: TrailingStatus? {
         if countdown.exists { return .timer }
         if preferences.showBattery, let percent = battery.percent { return .battery(percent) }
@@ -168,12 +285,17 @@ struct CommandItem: Identifiable {
     var glanceLead: GlanceLead {
         if preferences.privacy { return .privacy }
         if case .notification(let id) = glance, let record = record(id) { return .notification(record) }
-        let visible = visibleActivities
-        if let waiting = visible.first(where: { $0.event.phase == .waiting }) { return .activity(waiting) }
+        let ranked = rankedActivities
+        if let top = ranked.first, ActivityRanking.score(top, context: rankingContext) >= 600 { return .activity(top) }
         if preferences.mediaEnabled && media.playing { return .music }
         if countdown.exists { return .timer }
-        if let running = visible.first { return .activity(running) }
+        if let top = ranked.first { return .activity(top) }
         return .idle
+    }
+    /// How many stacked layers peek out under the glance (the lead plus up to two more).
+    var glanceStackDepth: Int {
+        guard case .activity = glanceLead else { return 0 }
+        return min(2, max(0, stackCount - 1))
     }
 
     func timerLabel(at date: Date) -> String {
@@ -240,21 +362,35 @@ struct CommandItem: Identifiable {
     /// first if needed, apply everything in a single animated transaction, trim the panel after.
     /// Springs retarget from their current value, so an interrupted transition reverses smoothly.
     private func commit(_ next: PresentationSnapshot, animation: Animation? = nil, also: (() -> Void)? = nil) {
-        let previous = snapshot
-        let nextForm = SurfaceLayout.form(for: next, model: self, previous: form)
+        let previous = snapshot, previousForm = form
+        // Opening the workspace freezes the stack's order first, so the form is sized for those rows.
+        if next.interaction.presentation == .expanded, previous.interaction.presentation != .expanded {
+            workspaceActivityIDs = rankedActivities.map(\.id)
+        }
+        var nextForm = SurfaceLayout.form(for: next, model: self, previous: previousForm)
         guard next != previous || nextForm != form || also != nil else { return }
-        let opening = next.interaction.presentation.depth > previous.interaction.presentation.depth
-            || (next.interaction.presentation == previous.interaction.presentation && nextForm.size.height >= form.size.height)
         if nextForm.size != form.size { windows?.prepare(for: nextForm.size) }
         let transition = windows?.beginTransition() ?? 0
-        withAnimation(animation ?? Motion.fluid(opening: opening), completionCriteria: .removed) {
+        let reshaping = nextForm.size != previousForm.size || next.interaction.presentation != previous.interaction.presentation
+        let motion = animation ?? Motion.surface(from: previous.interaction.presentation, to: next.interaction.presentation,
+                                                 growing: nextForm.size.height >= previousForm.size.height)
+        withAnimation(motion, completionCriteria: .removed) {
+            if reshaping { surfaceMoving = true }
             interaction = next.interaction
             route = next.route
             openNoteID = next.openNoteID
-            also?()
+            if let also {
+                // `also` can change what the surface shows (rows, filter, glance), so the form is
+                // resolved again from the state it leaves. The panel grows synchronously, before
+                // SwiftUI draws this transaction.
+                also()
+                nextForm = SurfaceLayout.form(for: next, model: self, previous: previousForm)
+                if nextForm.size != previousForm.size { windows?.prepare(for: nextForm.size) }
+            }
             form = nextForm
         } completion: { [weak self] in
             self?.windows?.settle(transition)
+            if self?.windows?.isLatest(transition) ?? true { self?.surfaceMoving = false }
         }
         // Completions can be held back while the window isn't drawn (Mission Control, occlusion). A timed
         // fallback still trims the panel, so it never lingers as an invisible block over the menu bar.
@@ -264,7 +400,6 @@ struct CommandItem: Identifiable {
 
     private func didCommit(from previous: PresentationSnapshot) {
         let now = interaction.presentation, was = previous.interaction.presentation
-        if was != .expanded && now == .expanded { workspaceActivityIDs = visibleActivities.map(\.id) }
         if now == .collapsed && was != .collapsed {
             if case .notification = glance { glance = .summary; _ = attention.dismissCurrent(now: Date(), context: attentionContext) }
             openedByDrag = false; dropTargeted = false
@@ -303,22 +438,40 @@ struct CommandItem: Identifiable {
         do {
             try queue.ingest(event)
             persistQueue()
-            if interaction.presentation == .expanded, visibleActivities.contains(where: { $0.id == event.key }),
-               !workspaceActivityIDs.contains(event.key) { workspaceActivityIDs.append(event.key) }
+            recordAgentStep(event)
             let updated = record(event.key)?.event
-            if updated == event && prior != event { deliver(event) }
+            let order = interaction.presentation == .expanded ? stackPlacement(for: event.key, prior: prior) : nil
+            if updated == event && event.isMaterialChange(from: prior) { deliver(event) }
+            if let record = record(event.key), [.completed, .cancelled].contains(record.event.lifecycle),
+               workspaceActivityIDs.contains(record.id), !record.isPinned { scheduleRetraction(record.id) }
             scheduleExpiryRefresh()
-            reflow()
+            if let order { commit(snapshot, animation: Motion.quick, also: { self.workspaceActivityIDs = order }) } else { reflow() }
         } catch { message = error.localizedDescription }
     }
 
+    /// Where a changed record goes in the open stack, or nil to leave the order alone. Rows keep their
+    /// place while the stack is open, except work that newly needs the person: it moves to the top so
+    /// an answer is never waiting below the fold. The row being read stays put.
+    private func stackPlacement(for id: String, prior: ActivityEvent?) -> [String]? {
+        guard let record = record(id), visibleActivities.contains(where: { $0.id == id }) else { return nil }
+        let urgent = [.needsInput, .failed].contains(record.event.lifecycle)
+            && (prior?.lifecycle != record.event.lifecycle || record.event.request != prior?.request)
+        var order = workspaceActivityIDs
+        if case .activity(id) = route { return order.contains(id) ? nil : order + [id] }
+        if urgent {
+            order.removeAll { $0 == id }
+            return [id] + order
+        }
+        return order.contains(id) ? nil : order + [id]
+    }
+
     private func deliver(_ event: ActivityEvent) {
-        let item = AttentionItem(id: event.key, priority: AttentionPriority(phase: event.phase), arrived: Date())
+        let item = AttentionItem(id: event.key, priority: AttentionPriority(state: event.lifecycle), arrived: Date())
         switch attention.receive(item, context: attentionContext) {
         case .present(let item): present(item)
         case .queue: resumeAttention(after: max(0.6, (attention.nextEligible() ?? Date()).timeIntervalSinceNow + 0.05))
         case .indicate:
-            illuminate(event.phase.tone)
+            illuminate(event.lifecycle.tone)
             if item.priority.interrupts, !(interaction.presentation == .expanded && route.feature == .activity) {
                 dockBadge = item.priority.tone
             }
@@ -386,6 +539,67 @@ struct CommandItem: Identifiable {
         guard case .activity(let detail) = route else { return }
         navigate(.activity(detail: detail == id ? nil : id))
     }
+    /// A finished task shows its terminal state for a beat, then retracts into History.
+    private func scheduleRetraction(_ id: String) {
+        retractions[id]?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.retractions[id] = nil
+            guard let record = self.record(id), [.completed, .cancelled].contains(record.event.lifecycle), !record.isPinned else { return }
+            if case .activity(id) = self.route { return } // being read: leave it in place
+            self.commit(self.snapshot, animation: Motion.quick, also: {
+                self.workspaceActivityIDs.removeAll { $0 == id }
+                self.historyPulse = UUID()
+            })
+        }
+        retractions[id] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: work)
+    }
+    // MARK: Agents
+
+    private func recordAgentStep(_ event: ActivityEvent) {
+        guard let agent = event.agent, let state = agent.state, record(event.key)?.event == event else { return }
+        let label = state.label(tool: agent.tool)
+        var steps = agentSteps[event.key] ?? []
+        guard steps.first?.label != label else { return }
+        steps.insert(AgentStep(date: event.timestamp, label: label, tone: event.lifecycle.tone), at: 0)
+        agentSteps[event.key] = Array(steps.prefix(Self.agentStepLimit))
+    }
+
+    /// Sends Allow or Deny to the waiting hook. The request is withdrawn at once so it can't be
+    /// answered twice; the hook reports the agent's next state.
+    func answer(_ record: ActivityRecord, _ decision: AgentApprovals.Decision) {
+        guard let request = record.actionableRequest() else {
+            message = "That request is no longer waiting. Answer it in the terminal."; return
+        }
+        do {
+            try approvals.respond(decision, to: request)
+            queue.clearRequest(record.id)
+            reflow()
+        } catch { message = error.localizedDescription }
+    }
+
+    func host(for record: ActivityRecord) -> HostApp? { HostApp.resolve(record.event.agent?.terminal) }
+
+    func openHost(_ record: ActivityRecord) {
+        guard let app = host(for: record) else { return }
+        windows?.close(restoringFocus: false)
+        app.activate()
+    }
+
+    func togglePin(_ record: ActivityRecord) {
+        queue.setPinned(record.id, !record.isPinned); persistQueue(); reflow()
+    }
+    /// Hides the task from the stack only: it stays in History and the task itself is unaffected.
+    func hideFromStack(_ record: ActivityRecord) {
+        queue.dismiss(record.id); attention.discard(id: record.id); persistQueue()
+        if case .activity(record.id) = route {
+            var next = snapshot; next.route = .activity(detail: nil)
+            commit(next, also: { self.workspaceActivityIDs.removeAll { $0 == record.id } })
+        } else {
+            commit(snapshot, animation: Motion.quick, also: { self.workspaceActivityIDs.removeAll { $0 == record.id } })
+        }
+    }
     func snooze(_ record: ActivityRecord) {
         queue.snooze(record.id, until: Date().addingTimeInterval(600))
         workspaceActivityIDs.removeAll { $0 == record.id }
@@ -409,8 +623,77 @@ struct CommandItem: Identifiable {
     func openAction(_ record: ActivityRecord) {
         guard let string = record.event.actionURL, let url = URL(string: string) else { return }
         do { try record.event.validate() } catch { message = error.localizedDescription; return }
-        // Actions never run automatically. No arbitrary shell commands are accepted.
+        // Actions never run automatically. No arbitrary shell commands are accepted. A downloaded
+        // file is revealed, not opened: opening an unknown download is the person's decision.
+        if url.isFileURL, record.event.kind == .download {
+            if FileManager.default.fileExists(atPath: url.path) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            else { message = "That file is no longer in Downloads." }
+            return
+        }
         NSWorkspace.shared.open(url)
+    }
+
+    struct NotificationAction { let title: String; let perform: () -> Void }
+    func notificationAction(_ record: ActivityRecord) -> NotificationAction {
+        if record.actionableRequest() != nil { return NotificationAction(title: "Review") { [weak self] in self?.viewNotificationDetails() } }
+        if record.event.actionURL != nil, [.meeting, .download, .ci, .build, .deploy].contains(record.event.kind) {
+            return NotificationAction(title: actionTitle(record)) { [weak self] in
+                self?.openAction(record); self?.dismissNotification()
+            }
+        }
+        return NotificationAction(title: "View") { [weak self] in self?.viewNotificationDetails() }
+    }
+
+    /// The action button's label, from what the action does.
+    func actionTitle(_ record: ActivityRecord) -> String {
+        switch record.event.kind {
+        case .meeting: "Join"
+        case .download: "Show in Finder"
+        case .ci: "Open run"
+        default: "Open"
+        }
+    }
+
+    // MARK: Context
+
+    private func updateContext(_ app: NSRunningApplication?) {
+        // NotchFlow taking focus (typing in a note, the palette) keeps the previous context.
+        if app?.processIdentifier == ProcessInfo.processInfo.processIdentifier { return }
+        let boost = preferences.contextAware ? ContextRules.boost(forFrontmost: app?.bundleIdentifier) : []
+        guard boost != contextBoost else { return }
+        contextBoost = boost
+        if interaction.presentation != .expanded { reflow() }
+    }
+
+    // MARK: System
+
+    private func configureClipboard() {
+        clipboard.configure(enabled: preferences.clipboardEnabled, retention: Double(max(1, preferences.clipboardRetentionHours)) * 3600,
+                            lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+    }
+    func clearClipboard() { clipboard.clear(); reflow() }
+
+    func refreshAudioOutputs() {
+        audioOutputs = AudioDevices.outputs()
+        defaultAudioOutput = AudioDevices.defaultOutput()
+        reflow()
+    }
+    func selectAudioOutput(_ device: AudioOutput) {
+        if AudioDevices.setDefaultOutput(device.id) { defaultAudioOutput = device.id }
+        else { message = "macOS didn't switch to \(device.name)." }
+    }
+
+    private func batteryChanged(from previous: Int?, to current: Int?, charging: Bool) {
+        guard preferences.lowBatteryAlerts, let current else { return }
+        let id = "battery-low"
+        if charging, let record = record("system:" + id), !record.event.lifecycle.terminal {
+            ingest(ActivityEvent(source: "system", activityId: id, state: .cancelled, title: record.event.title, category: .system, summary: "Charging"))
+            return
+        }
+        guard let threshold = BatteryAlerts.crossed(from: previous, to: current, charging: charging) else { return }
+        ingest(ActivityEvent(source: "system", activityId: id, state: .waiting, title: "Battery at \(current)%", category: .system,
+                             summary: threshold <= 5 ? "Your Mac will sleep soon. Connect power." : "Connect power soon.",
+                             expiresAt: Date().addingTimeInterval(1800)))
     }
 
     private func applyRetention() {
@@ -427,7 +710,8 @@ struct CommandItem: Identifiable {
         let boundaries = queue.records.compactMap { record -> Date? in
             guard !record.event.phase.terminal else { return nil }
             let expiry = record.event.expiresAt ?? record.event.timestamp.addingTimeInterval(3600)
-            return [expiry, record.snoozedUntil].compactMap { $0 }.filter { $0 > now }.min()
+            // A pending request's buttons disappear when it lapses, even if its hook never reports back.
+            return [expiry, record.snoozedUntil, record.event.request?.expiresAt].compactMap { $0 }.filter { $0 > now }.min()
         }
         guard let next = boundaries.min() else { return }
         let work = DispatchWorkItem { [weak self] in
@@ -457,7 +741,7 @@ struct CommandItem: Identifiable {
             self.dropTargeted = false
             self.lastArrival = added.last
         })
-        if !added.isEmpty { illuminate(.mint) }
+        if !added.isEmpty { illuminate(.silver) }
         if openedByDrag {
             // A drop that opened the shelf hands the notch back once the file has landed.
             returnWork?.cancel()
@@ -534,7 +818,8 @@ struct CommandItem: Identifiable {
     }
     private func persistTimer() { UserDefaults.standard.set(try? JSONEncoder().encode(countdown), forKey: "countdown") }
     private func persistQueue() {
-        do { try ActivityEvent.encoder().encode(queue).write(to: queueURL, options: .atomic) }
+        // History on disk never holds pending requests or sensitive summaries.
+        do { try ActivityEvent.encoder().encode(queue.historySafe).write(to: queueURL, options: .atomic) }
         catch { message = "Could not save activity history: \(error.localizedDescription)" }
     }
 
@@ -556,13 +841,18 @@ struct CommandItem: Identifiable {
         items += quickApps.map { app in
             CommandItem(id: "app-\(app.id)", title: "Open \(app.name)", symbol: "arrow.up.forward.app", hint: "App") { app.open() }
         }
+        for mode in ProductMode.allCases where preferences.mode != mode {
+            items.append(CommandItem(id: "mode-\(mode.rawValue)", title: "Use \(mode.title) mode", symbol: "slider.horizontal.3", hint: "Mode") { [weak self] in
+                self?.preferences.apply(mode)
+            })
+        }
         items.append(CommandItem(id: "quiet", title: preferences.quietMode ? "Turn off quiet mode" : "Turn on quiet mode", symbol: "bell.slash") { [weak self] in self?.preferences.quietMode.toggle() })
         items.append(CommandItem(id: "privacy", title: preferences.privacy ? "Show private details" : "Hide private details", symbol: "eye.slash") { [weak self] in self?.preferences.privacy.toggle() })
         items.append(CommandItem(id: "settings", title: "Settings…", symbol: "gearshape", hint: "⌘,") { NotificationCenter.default.post(name: .openNotchFlowSettings, object: nil) })
         let query = commandQuery.trimmingCharacters(in: .whitespaces).lowercased()
         guard !query.isEmpty else { return items }
         let activities = queue.records.filter { $0.event.title.lowercased().contains(query) }.prefix(4).map { record in
-            CommandItem(id: "rec-\(record.id)", title: record.event.title, symbol: record.event.phase.symbol, hint: record.event.source) { [weak self] in
+            CommandItem(id: "rec-\(record.id)", title: record.event.title, symbol: record.event.lifecycle.symbol, hint: record.event.source) { [weak self] in
                 self?.navigate(.history(detail: record.id))
             }
         }
@@ -582,7 +872,10 @@ struct CommandItem: Identifiable {
         } else { backdrop.stop() }
     }
 
-    func stop() { clock.run(false); bridge.stop(); media.stop(); camera.stop(); backdrop.stop(); battery.stop() }
+    func stop() {
+        clock.run(false); providers.stopAll(); approvals.withdraw()
+        media.stop(); camera.stop(); backdrop.stop(); battery.stop()
+    }
 }
 
 extension Notification.Name {

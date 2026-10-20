@@ -111,7 +111,7 @@ struct NoteEditor: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Ink.surface.opacity(0.95))
                         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(focused ? Ink.iris.opacity(0.45) : .white.opacity(0.05), lineWidth: 1))
+                            .strokeBorder(focused ? Ink.accent.opacity(0.55) : .white.opacity(0.05), lineWidth: 1))
                         .nookMatched("note-\(note.id)", in: namespace)
                 }
                 .focused($focused)

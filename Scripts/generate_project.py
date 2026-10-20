@@ -14,16 +14,18 @@ def generate():
     for path in files:
         obj("file:" + path, f"isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = {quote(path)}; sourceTree = SOURCE_ROOT;")
         obj("build:" + path, f"isa = PBXBuildFile; fileRef = {ident('file:' + path)};")
-    metal = "Resources/LiquidGlass.metal"
-    obj("file:" + metal, f"isa = PBXFileReference; lastKnownFileType = text; path = {quote(metal)}; sourceTree = SOURCE_ROOT;")
-    obj("build:" + metal, f"isa = PBXBuildFile; fileRef = {ident('file:' + metal)};")
+    # The shader, and the event CLI so Settings can show hook commands that point inside the app.
+    resources = [("Resources/LiquidGlass.metal", "text"), ("Scripts/notchflow.py", "text.script.python")]
+    for path, kind in resources:
+        obj("file:" + path, f"isa = PBXFileReference; lastKnownFileType = {kind}; path = {quote(path)}; sourceTree = SOURCE_ROOT;")
+        obj("build:" + path, f"isa = PBXBuildFile; fileRef = {ident('file:' + path)};")
     obj("product", 'isa = PBXFileReference; explicitFileType = wrapper.application; path = NotchFlow.app; sourceTree = BUILT_PRODUCTS_DIR;')
-    children = ", ".join(ident("file:" + p) for p in files + [metal])
+    children = ", ".join(ident("file:" + p) for p in files + [path for path, _ in resources])
     obj("mainGroup", f'isa = PBXGroup; children = ({children}, {ident("products")}); sourceTree = "<group>";')
     obj("products", f'isa = PBXGroup; children = ({ident("product")}); name = Products; sourceTree = "<group>";')
     build_refs = ", ".join(ident("build:" + p) for p in files)
     obj("sources", f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({build_refs}); runOnlyForDeploymentPostprocessing = 0;')
-    obj("resources", f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({ident("build:" + metal)}); runOnlyForDeploymentPostprocessing = 0;')
+    obj("resources", f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({", ".join(ident("build:" + path) for path, _ in resources)}); runOnlyForDeploymentPostprocessing = 0;')
     obj("frameworks", 'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;')
     for level in ("project", "target"):
         configs = []

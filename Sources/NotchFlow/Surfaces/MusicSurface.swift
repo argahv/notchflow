@@ -29,7 +29,7 @@ struct MusicSurface: View {
     /// One prominent action; the alternative player is a quiet second choice.
     private var connect: some View {
         HStack(spacing: 12) {
-            ToneGlyph(symbol: "music.note", tone: .iris, size: 32)
+            ToneGlyph(symbol: "music.note", tone: .silver, size: 32)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Connect your music").font(TypeScale.cardTitle)
                 Text("macOS asks before NotchFlow can control the player.").font(TypeScale.secondary).foregroundStyle(Ink.secondary)
@@ -57,7 +57,7 @@ struct MusicSurface: View {
                     .font(.system(size: 12)).foregroundStyle(Ink.secondary).lineLimit(1)
                 HStack(spacing: 8) {
                     Text(Self.clock(media.elapsed))
-                    ProgressLine(value: media.progress, tone: .iris)
+                    Scrubber(progress: media.progress, duration: media.duration) { media.seek(to: $0) }
                     Text(Self.clock(media.duration))
                 }
                 .font(TypeScale.meta.monospacedDigit()).foregroundStyle(Ink.secondary)
@@ -97,5 +97,43 @@ struct MusicSurface: View {
     static func clock(_ seconds: Double) -> String {
         let total = max(0, Int(seconds.rounded()))
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+/// Playback position you can drag. The line stays a hairline until touched; a thumb appears while
+/// hovering or dragging, and the seek happens on release so the player isn't flooded.
+private struct Scrubber: View {
+    let progress: Double
+    let duration: Double
+    let seek: (Double) -> Void
+    @State private var dragging: Double?
+    @State private var hovering = false
+    var body: some View {
+        GeometryReader { proxy in
+            let width = max(1, proxy.size.width)
+            let value = dragging ?? progress
+            ZStack(alignment: .leading) {
+                Capsule().fill(Ink.hover).frame(height: hovering || dragging != nil ? 4 : 3)
+                Capsule().fill(Ink.silver).frame(width: max(3, width * value), height: hovering || dragging != nil ? 4 : 3)
+                Circle().fill(Ink.primary).frame(width: 9, height: 9)
+                    .offset(x: width * value - 4.5)
+                    .opacity(hovering || dragging != nil ? 1 : 0)
+            }
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { dragging = min(1, max(0, $0.location.x / width)) }
+                .onEnded { _ in if let dragging { seek(dragging) }; dragging = nil })
+        }
+        .frame(height: 14)
+        .onHover { hovering = $0 }
+        .animation(Motion.micro, value: hovering)
+        .accessibilityElement()
+        .accessibilityLabel("Playback position")
+        .accessibilityValue("\(Int(progress * duration)) of \(Int(duration)) seconds")
+        .accessibilityAdjustableAction { direction in
+            let step = duration > 0 ? 10 / duration : 0
+            seek(min(1, max(0, progress + (direction == .increment ? step : -step))))
+        }
     }
 }
