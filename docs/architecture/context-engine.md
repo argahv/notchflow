@@ -28,11 +28,14 @@ Turn it off with Settings › Mode › "Follow the app in front".
 Modes are **presets**, not states. Choosing one writes a fixed set of preferences once. Changing any of them
 afterwards shows "Custom", and nothing is reverted behind your back.
 
-| | Quiet mode | Battery | Follow app | Hover delay | GitHub Actions |
-|---|---|---|---|---|---|
-| Minimal | on | off | off | 0.25 s | off |
-| Dynamic (defaults) | off | on | on | 0.12 s | off |
-| Developer | off | on | on | 0.12 s | on (polls only the repositories you add) |
+| | Quiet mode | Follow app | Hover delay | GitHub Actions |
+|---|---|---|---|---|
+| Minimal | on | off | 0.25 s | off |
+| Dynamic (defaults) | off | on | 0.12 s | off |
+| Developer | off | on | 0.12 s | on (polls only the repositories you add) |
+
+The battery indicator is a personal display choice, so it isn't part of any preset; it's off by default and
+shown only when turned on in Settings.
 
 Features that need a permission or personal data stay separate opt-ins in every mode: clipboard history,
 Download Center, meeting reminders, low-battery alerts and agent approvals. Modes are in Settings › Mode and

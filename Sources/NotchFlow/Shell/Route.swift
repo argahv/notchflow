@@ -109,6 +109,8 @@ struct SurfaceForm: Equatable {
     var size: CGSize
     var ear: CGFloat
     var corner: CGFloat
+    /// Non-zero only at rest with nothing to show: the shape tucks just inside the hardware notch.
+    var inset: CGFloat = 0
 }
 
 /// Everything that decides the surface's geometry, so the next size can be computed before any

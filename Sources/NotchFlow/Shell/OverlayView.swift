@@ -9,7 +9,7 @@ struct OverlayView: View {
     @Namespace private var space
     var body: some View {
         let form = model.form
-        let shape = NotchShape(ear: form.ear, corner: form.corner)
+        let shape = NotchShape(ear: form.ear, corner: form.corner, inset: form.inset)
         let presentation = model.interaction.presentation
         let contentHeight = max(0, form.size.height - model.geometry.band)
         ZStack(alignment: .top) {
@@ -33,8 +33,9 @@ struct OverlayView: View {
         }
         .frame(width: form.size.width, height: form.size.height, alignment: .top)
         .clipShape(shape)
-        .overlay { EdgeLight(shape: shape, presentation: presentation, awareness: model.interaction.awareness) }
-        .overlay { RimIllumination(shape: shape, illumination: model.illumination) }
+        .overlay { EdgeLight(shape: shape, presentation: presentation, awareness: model.interaction.awareness,
+                             moving: model.surfaceMoving, band: model.geometry.band) }
+        .overlay { RimIllumination(shape: shape, illumination: model.illumination, band: model.geometry.band) }
         .contentShape(shape)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.nookNamespace, space)

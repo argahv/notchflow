@@ -33,12 +33,11 @@ public enum ContextRules {
 /// permission or data (clipboard, downloads, meetings) stay separate opt-ins.
 public struct ModeSettings: Equatable, Sendable {
     public var quietMode: Bool
-    public var showBattery: Bool
     public var contextAware: Bool
     public var hoverDelay: Double
     public var github: Bool
-    public init(quietMode: Bool, showBattery: Bool, contextAware: Bool, hoverDelay: Double, github: Bool) {
-        self.quietMode = quietMode; self.showBattery = showBattery; self.contextAware = contextAware
+    public init(quietMode: Bool, contextAware: Bool, hoverDelay: Double, github: Bool) {
+        self.quietMode = quietMode; self.contextAware = contextAware
         self.hoverDelay = hoverDelay; self.github = github
     }
 }
@@ -51,16 +50,16 @@ public enum ProductMode: String, CaseIterable, Identifiable, Sendable {
     }
     public var summary: String {
         switch self {
-        case .minimal: "A quiet notch: no automatic previews, no battery, no context ranking. Open it when you want it."
+        case .minimal: "A quiet notch: no automatic previews and no context ranking. Open it when you want it."
         case .dynamic: "Previews for things that need you, and a stack that follows the app in front."
         case .developer: "Dynamic, plus GitHub Actions for the repositories you add. Agents and pipelines rank first while an editor or terminal is in front."
         }
     }
     public var settings: ModeSettings {
         switch self {
-        case .minimal: ModeSettings(quietMode: true, showBattery: false, contextAware: false, hoverDelay: 0.25, github: false)
-        case .dynamic: ModeSettings(quietMode: false, showBattery: true, contextAware: true, hoverDelay: 0.12, github: false)
-        case .developer: ModeSettings(quietMode: false, showBattery: true, contextAware: true, hoverDelay: 0.12, github: true)
+        case .minimal: ModeSettings(quietMode: true, contextAware: false, hoverDelay: 0.25, github: false)
+        case .dynamic: ModeSettings(quietMode: false, contextAware: true, hoverDelay: 0.12, github: false)
+        case .developer: ModeSettings(quietMode: false, contextAware: true, hoverDelay: 0.12, github: true)
         }
     }
     /// The mode the current settings match exactly, or nil for a custom setup.

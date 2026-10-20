@@ -18,6 +18,15 @@ final class NotchCoreTests: XCTestCase {
         XCTAssertEqual(state.presentation, .expanded); XCTAssertTrue(state.editing)
         state.send(.dismiss); XCTAssertFalse(state.editing); XCTAssertFalse(state.pinned)
     }
+    func testSurfacesAnchorOnTheMeasuredNotchAndStayOnScreen() {
+        let display = DisplayGeometry(x: 0, y: 0, width: 1710, height: 1112, notchWidth: 208, notchHeight: 37.5, notchCenterX: 857)
+        XCTAssertEqual(display.origin(panelWidth: 500, panelHeight: 300).x, 607, "centred on the notch, not the screen")
+        XCTAssertEqual(DisplayGeometry(x: 0, y: 0, width: 1710, height: 1112).origin(panelWidth: 500, panelHeight: 300).x, 605)
+        let edge = DisplayGeometry(x: 0, y: 0, width: 600, height: 400, notchWidth: 180, notchHeight: 32, notchCenterX: 590)
+        XCTAssertEqual(edge.origin(panelWidth: 500, panelHeight: 300).x, 100, "never off screen")
+        XCTAssertEqual(DisplayGeometry(x: 0, y: 0, width: 1710, height: 1112, notchHeight: 37.5).notchCorner, 10.5, accuracy: 0.001)
+    }
+
     func testGeometryUsesGlobalDisplayOrigin() {
         let geometry = DisplayGeometry(x: -1920, y: 100, width: 1920, height: 1080)
         let origin = geometry.origin(panelWidth: 540, panelHeight: 480)

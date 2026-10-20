@@ -28,6 +28,8 @@ enum Ink {
     static let amber = Color(hex: 0xFFBE76)
     static let coral = Color(hex: 0xFF858F)
     static let blue = Color(hex: 0x82B8FF)
+    /// Reflective highlights on the surface's edge.
+    static let silver = Color(hex: 0xC8CDD4)
 }
 
 enum Tone: Equatable {

@@ -1,33 +1,8 @@
 import SwiftUI
 
-/// The surface outline: full-width top edge, concave ears where it meets the bezel, convex bottom
-/// corners. Both radii animate, so the silhouette never jumps from sharp to round.
-struct NotchShape: Shape {
-    var ear: CGFloat
-    var corner: CGFloat
-    var animatableData: AnimatablePair<CGFloat, CGFloat> {
-        get { AnimatablePair(ear, corner) }
-        set { ear = newValue.first; corner = newValue.second }
-    }
-    func path(in rect: CGRect) -> Path {
-        let e = max(0, min(ear, rect.width / 4, rect.height / 2))
-        let c = max(0, min(corner, rect.height - e, (rect.width - 2 * e) / 2))
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-        path.addQuadCurve(to: CGPoint(x: rect.minX + e, y: rect.minY + e), control: CGPoint(x: rect.minX + e, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.minX + e, y: rect.maxY - c))
-        path.addQuadCurve(to: CGPoint(x: rect.minX + e + c, y: rect.maxY), control: CGPoint(x: rect.minX + e, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.maxX - e - c, y: rect.maxY))
-        path.addQuadCurve(to: CGPoint(x: rect.maxX - e, y: rect.maxY - c), control: CGPoint(x: rect.maxX - e, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.maxX - e, y: rect.minY + e))
-        path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY), control: CGPoint(x: rect.maxX - e, y: rect.minY))
-        // Left open: fills and clips close it implicitly, while strokes skip the screen's top edge.
-        return path
-    }
-}
-
-/// Material 0 → Balanced/Ultra glass. The menu-bar band is pure black so the surface reads as the
-/// camera housing itself; below it, a near-black glass with a slight lift toward the bottom.
+/// Polished black glass. The top is the camera housing, pure black; the interior is obsidian,
+/// nearly opaque, so the camera housing and the workspace read as one material with no tonal step.
+/// Translucency is a trace, for depth, never enough to show what's behind as grey.
 struct ObsidianSurface: View {
     @EnvironmentObject var preferences: Preferences
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -37,44 +12,64 @@ struct ObsidianSurface: View {
     var body: some View {
         ZStack(alignment: .top) {
             if preferences.visualMode == .performance || reduceTransparency {
-                Ink.void
+                Ink.obsidian
             } else {
                 NativeMaterial()
-                Ink.obsidian.opacity(0.86)
+                Ink.obsidian.opacity(0.95)
                 if preferences.visualMode == .ultra, let image = backdrop.frame {
-                    RefractiveGlass(image: image, form: form, band: band, capture: backdrop.captureSize).opacity(0.6)
-                    Ink.void.opacity(0.3)
+                    RefractiveGlass(image: image, form: form, band: band, capture: backdrop.captureSize).opacity(0.35)
+                    Ink.void.opacity(0.45)
                 }
-                LinearGradient(colors: [.clear, Ink.surface.opacity(0.55)], startPoint: .top, endPoint: .bottom)
             }
-            VStack(spacing: 0) {
-                Color.black.frame(height: band)
-                LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom).frame(height: 34)
-            }
+            // The housing eases into the interior over a long distance, so there's no seam to find.
+            LinearGradient(stops: [.init(color: .black, location: 0),
+                                   .init(color: .black, location: min(0.95, band / max(band + 1, form.size.height))),
+                                   .init(color: .black.opacity(0), location: min(1, (band + 44) / max(band + 1, form.size.height)))],
+                           startPoint: .top, endPoint: .bottom)
         }
         .allowsHitTesting(false)
     }
 }
 
-/// Resting edge light: the lower edge catches light, the sides fade out before the band, the top
-/// (the bezel) never does. Awareness swaps it for a restrained iris rim.
+/// Fades a stroke out toward the top, so edge light lives on the lower boundary and never draws a
+/// line along the screen edge or across the attachment to the notch.
+private struct LowerEdgeMask: View {
+    let band: CGFloat
+    var body: some View {
+        GeometryReader { proxy in
+            let height = max(proxy.size.height, 1)
+            LinearGradient(stops: [.init(color: .clear, location: 0),
+                                   .init(color: .clear, location: min(0.9, band * 0.6 / height)),
+                                   .init(color: .black, location: min(1, (band + 10) / height))],
+                           startPoint: .top, endPoint: .bottom)
+        }
+    }
+}
+
+/// Silver reflection on the lower edge. Nearly invisible at rest; it catches light while the shape
+/// moves and settles back when it stops. Hover brings it up at the lower corners first.
 struct EdgeLight: View {
     let shape: NotchShape
     let presentation: Presentation
     let awareness: Awareness
+    let moving: Bool
+    let band: CGFloat
     var body: some View {
-        ZStack {
-            shape.stroke(LinearGradient(stops: [.init(color: .white.opacity(0), location: 0),
-                                                .init(color: .white.opacity(0), location: 0.25),
-                                                .init(color: .white.opacity(0.1), location: 1)],
-                                        startPoint: .top, endPoint: .bottom), lineWidth: 1)
-                .opacity(presentation == .collapsed ? 0 : 1)
-            shape.stroke(LinearGradient(colors: [Ink.iris.opacity(0), Ink.iris.opacity(awareness == .drag ? 0.9 : 0.5)],
-                                        startPoint: .top, endPoint: .bottom), lineWidth: awareness == .drag ? 1.5 : 1)
-                .opacity(presentation == .collapsed && awareness != .none ? 1 : 0)
-        }
-        .animation(Motion.quick, value: awareness)
-        .allowsHitTesting(false)
+        let resting = presentation == .collapsed && awareness == .none
+        let strength: Double = resting ? 0 : awareness == .drag ? 0.5 : moving ? 0.26 : presentation == .collapsed ? 0.2 : 0.11
+        shape.stroke(Ink.silver, lineWidth: awareness == .drag ? 1.2 : 0.8)
+            .mask { LowerEdgeMask(band: band) }
+            // The lower corners catch the light more than the long bottom edge (masks multiply).
+            .mask {
+                LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black.opacity(0.45), location: 0.3),
+                                       .init(color: .black.opacity(0.45), location: 0.7), .init(color: .black, location: 1)],
+                               startPoint: .leading, endPoint: .trailing)
+            }
+            .opacity(strength)
+            .animation(moving ? Motion.micro : .easeOut(duration: 0.6), value: moving)
+            .animation(Motion.quick, value: awareness)
+            .animation(Motion.quick, value: presentation)
+            .allowsHitTesting(false)
     }
 }
 
@@ -83,21 +78,23 @@ struct Illumination: Equatable {
     let tone: Tone
 }
 
-/// Material 4: a brief rim of light in the event's colour that dissolves back into the surface.
+/// A notification's arrival: the lower edge briefly lights in the event's semantic colour, then
+/// dissolves back into the surface. Never a full outline, never across the top.
 struct RimIllumination: View {
     let shape: NotchShape
     let illumination: Illumination?
+    let band: CGFloat
     var body: some View {
-        let color = illumination?.tone.color ?? Ink.iris
+        let color = illumination?.tone.color ?? Ink.silver
         ZStack {
-            shape.fill(RadialGradient(colors: [color.opacity(0), color.opacity(0.14)], center: .top, startRadius: 40, endRadius: 320))
-            shape.stroke(color.opacity(0.9), lineWidth: 1.3)
+            shape.fill(RadialGradient(colors: [color.opacity(0), color.opacity(0.1)], center: .bottom, startRadius: 10, endRadius: 260))
+            shape.stroke(color.opacity(0.85), lineWidth: 1.1).mask { LowerEdgeMask(band: band) }
         }
         .keyframeAnimator(initialValue: 0.0, trigger: illumination?.id) { view, value in
             view.opacity(value)
         } keyframes: { _ in
             CubicKeyframe(1, duration: 0.14)
-            CubicKeyframe(0.6, duration: 0.3)
+            CubicKeyframe(0.55, duration: 0.3)
             CubicKeyframe(0, duration: 0.9)
         }
         .allowsHitTesting(false)

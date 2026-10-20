@@ -51,10 +51,11 @@ enum Metrics {
     static func form(for snapshot: PresentationSnapshot, model: AppModel, previous: SurfaceForm?) -> SurfaceForm {
         let display = model.geometry
         let prior = previous.map { SurfaceSize(width: Double($0.size.width), height: Double($0.size.height)) }
-        func resolve(_ contract: SizeContract, wing: Double, ear: CGFloat, corner: CGFloat) -> SurfaceForm {
+        func resolve(_ contract: SizeContract, wing: Double, ear: CGFloat, corner: CGFloat, inset: CGFloat = 0) -> SurfaceForm {
             let size = SurfaceGeometryEngine.resolve(contract, display: display, wing: wing, previous: prior)
-            return SurfaceForm(size: CGSize(width: size.width, height: size.height), ear: ear, corner: corner)
+            return SurfaceForm(size: CGSize(width: size.width, height: size.height), ear: ear, corner: corner, inset: inset)
         }
+        let hardware = CGFloat(display.notchCorner)
         switch snapshot.interaction.presentation {
         case .collapsed:
             if snapshot.interaction.awareness == .drag {
@@ -65,9 +66,11 @@ enum Metrics {
             let status = model.hasBandStatus
             let aware = snapshot.interaction.awareness == .pointer
             let wing = status ? Metrics.statusWing : 0
-            // With nothing to show, the resting surface hides entirely behind the hardware notch.
+            // With nothing to show, the surface is the hardware notch, drawn a point inside it so it
+            // disappears into the housing. Hover stretches the lower edge slightly; a status widens it.
             return resolve(.content(width: display.notchWidth + 2 * wing + (aware ? 16 : 0), height: aware ? 5 : 0, maxHeight: 40),
-                           wing: wing, ear: status || aware ? 6 : 2, corner: status || aware ? 12 : 9)
+                           wing: wing, ear: status || aware ? 6 : 3, corner: status || aware ? hardware + 3 : hardware,
+                           inset: status || aware ? 0 : 1)
         case .preview:
             let depth = Double(model.glanceStackDepth)
             return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing,

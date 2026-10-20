@@ -38,7 +38,9 @@ struct CommandItem: Identifiable {
     @Published private(set) var interaction = InteractionState()
     @Published private(set) var route: Route = .activity(detail: nil)
     @Published private(set) var openNoteID: UUID?
-    @Published private(set) var form = SurfaceForm(size: CGSize(width: 208, height: 37.5), ear: 2, corner: 9)
+    /// True while the silhouette is changing shape; the edge catches light, then settles.
+    @Published private(set) var surfaceMoving = false
+    @Published private(set) var form = SurfaceForm(size: CGSize(width: 208, height: 37.5), ear: 3, corner: 10, inset: 1)
     @Published private(set) var glance: GlanceSubject = .summary
     @Published private(set) var illumination: Illumination?
     @Published private(set) var dockBadge: Tone?
@@ -361,11 +363,13 @@ struct CommandItem: Identifiable {
         }
         var nextForm = SurfaceLayout.form(for: next, model: self, previous: previousForm)
         guard next != previous || nextForm != form || also != nil else { return }
-        let opening = next.interaction.presentation.depth > previous.interaction.presentation.depth
-            || (next.interaction.presentation == previous.interaction.presentation && nextForm.size.height >= form.size.height)
         if nextForm.size != form.size { windows?.prepare(for: nextForm.size) }
         let transition = windows?.beginTransition() ?? 0
-        withAnimation(animation ?? Motion.fluid(opening: opening), completionCriteria: .removed) {
+        let reshaping = nextForm.size != previousForm.size || next.interaction.presentation != previous.interaction.presentation
+        let motion = animation ?? Motion.surface(from: previous.interaction.presentation, to: next.interaction.presentation,
+                                                 growing: nextForm.size.height >= previousForm.size.height)
+        withAnimation(motion, completionCriteria: .removed) {
+            if reshaping { surfaceMoving = true }
             interaction = next.interaction
             route = next.route
             openNoteID = next.openNoteID
@@ -380,6 +384,7 @@ struct CommandItem: Identifiable {
             form = nextForm
         } completion: { [weak self] in
             self?.windows?.settle(transition)
+            if self?.windows?.isLatest(transition) ?? true { self?.surfaceMoving = false }
         }
         // Completions can be held back while the window isn't drawn (Mission Control, occlusion). A timed
         // fallback still trims the panel, so it never lingers as an invisible block over the menu bar.

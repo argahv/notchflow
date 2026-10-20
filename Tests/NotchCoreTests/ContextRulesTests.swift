@@ -28,7 +28,7 @@ final class ContextRulesTests: XCTestCase {
         XCTAssertEqual(Set(all.map { "\($0)" }).count, all.count, "every mode sets something different")
         for mode in ProductMode.allCases { XCTAssertEqual(ProductMode.matching(mode.settings), mode) }
         var custom = ProductMode.dynamic.settings
-        custom.showBattery = false
+        custom.contextAware = false
         XCTAssertNil(ProductMode.matching(custom), "a changed setting is a custom setup, not silently a mode")
     }
 }

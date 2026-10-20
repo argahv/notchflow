@@ -126,12 +126,20 @@ import Carbon
         guard let screen else { panel.orderOut(nil); return }
         let frame = screen.frame
         let realNotch = screen.safeAreaInsets.top > 0
-        let notchWidth: CGFloat
+        var notchWidth = CGFloat(model.preferences.notchWidth)
+        var notchCenter: Double?
         if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea, realNotch {
+            // The hardware notch is exactly the gap between the two menu-bar areas. AppKit doesn't
+            // say whether these rects are global or screen-local; read them whichever way places them
+            // on this screen, and trust the result only near the midpoint, where Apple puts the notch.
             notchWidth = max(100, right.minX - left.maxX)
-        } else { notchWidth = model.preferences.notchWidth }
+            let global = left.minX >= frame.minX - 1 && right.maxX <= frame.maxX + 1
+            let center = (left.maxX + right.minX) / 2 + (global ? 0 : frame.minX)
+            if abs(center - frame.midX) <= 40 { notchCenter = Double(center) }
+        }
         let measured = DisplayGeometry(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height,
-                                       notchWidth: notchWidth, notchHeight: max(30, screen.safeAreaInsets.top))
+                                       notchWidth: notchWidth, notchHeight: max(30, screen.safeAreaInsets.top),
+                                       notchCenterX: notchCenter)
         if model.geometry != measured { model.geometry = measured }
         guard model.preferences.overlayEnabled, realNotch || model.preferences.simulatedNotch else {
             panel.orderOut(nil); model.backdrop.stop(); return
@@ -158,6 +166,7 @@ import Carbon
         host?.layoutSubtreeIfNeeded()
     }
     func beginTransition() -> Int { transitions += 1; return transitions }
+    func isLatest(_ transition: Int) -> Bool { transition == transitions }
     /// After the latest transition settles, trim the panel back to the silhouette.
     func settle(_ transition: Int) {
         guard transition == transitions, panel.isVisible, !suspended else { return }
@@ -205,7 +214,7 @@ import Carbon
 
     private var notchRect: NSRect {
         let g = model.geometry
-        return NSRect(x: g.x + (g.width - g.notchWidth) / 2, y: g.y + g.height - g.notchHeight,
+        return NSRect(x: g.anchorX - g.notchWidth / 2, y: g.y + g.height - g.notchHeight,
                       width: g.notchWidth, height: g.notchHeight)
     }
 
