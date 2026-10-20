@@ -276,8 +276,12 @@ struct GlanceView: View {
                 .nookMatched("lead-\(record.id)", in: namespace).reveal(.primary)
             text(record.event.title, ActivityText.subtitle(record), titleStagger: 0.03)
             Spacer(minLength: 8)
-            Button("View") { model.viewNotificationDetails() }
+            // The notification's own next step: Review a request (answered in the detail, never from
+            // here), Join a call, Show a download, Open a failed run; otherwise View.
+            let primary = model.notificationAction(record)
+            Button(primary.title) { primary.perform() }
                 .buttonStyle(PillButtonStyle(prominent: true, tone: record.event.lifecycle.tone))
+                .help(primary.title == "View" ? "Show details" : primary.title)
                 .reveal(.detail)
             Button { model.dismissNotification() } label: { Image(systemName: "xmark") }
                 .buttonStyle(IconButtonStyle(size: 24, tint: Ink.secondary)).accessibilityLabel("Dismiss")

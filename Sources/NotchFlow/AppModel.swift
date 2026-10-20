@@ -612,6 +612,17 @@ struct CommandItem: Identifiable {
         NSWorkspace.shared.open(url)
     }
 
+    struct NotificationAction { let title: String; let perform: () -> Void }
+    func notificationAction(_ record: ActivityRecord) -> NotificationAction {
+        if record.actionableRequest() != nil { return NotificationAction(title: "Review") { [weak self] in self?.viewNotificationDetails() } }
+        if record.event.actionURL != nil, [.meeting, .download, .ci, .build, .deploy].contains(record.event.kind) {
+            return NotificationAction(title: actionTitle(record)) { [weak self] in
+                self?.openAction(record); self?.dismissNotification()
+            }
+        }
+        return NotificationAction(title: "View") { [weak self] in self?.viewNotificationDetails() }
+    }
+
     /// The action button's label, from what the action does.
     func actionTitle(_ record: ActivityRecord) -> String {
         switch record.event.kind {
