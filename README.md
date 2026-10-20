@@ -103,8 +103,19 @@ first; with a browser in front, downloads do. It never opens itself.
 
 ## Get NotchFlow
 
-There's no signed download yet, so build it yourself in about a minute. You need macOS 14.6 or later and
-Xcode 16 or later.
+<p align="center">
+  <a href="https://github.com/argahv/notchflow/releases/latest"><img alt="Download NotchFlow for macOS" src="https://img.shields.io/badge/Download-NotchFlow%20for%20macOS-0A84FF?style=for-the-badge&logo=apple&logoColor=white"></a>
+</p>
+
+Download the zip from the [latest release](https://github.com/argahv/notchflow/releases/latest), unzip it, and drag
+**NotchFlow** to Applications. It's signed with a Developer ID and notarized by Apple, so it opens like any
+other app. It needs macOS 14.6 or later and runs natively on Apple silicon and Intel. Each release lists a
+SHA-256 checksum.
+
+<details>
+<summary>Build it yourself instead</summary>
+
+You need Xcode 16 or later.
 
 ```bash
 git clone https://github.com/argahv/notchflow.git
@@ -118,8 +129,10 @@ cd notchflow && bash Scripts/build.sh
 open build/NotchFlow.app
 ```
 
-That gives you an unsigned universal app. To keep it in `/Applications` with launch at login and stable
-permissions, open `NotchFlow.xcodeproj`, choose your signing team, and Run.
+That's an unsigned universal build for development. Releases are made with `Scripts/release.sh`; see
+[releasing](docs/RELEASING.md).
+
+</details>
 
 **First steps.** Hover the notch, or press **⌃⌥Space** anywhere. Pick a mode in Settings: **Minimal**,
 **Dynamic** or **Developer**. To follow Claude Code or Codex, open **Settings › Agents**, press **Copy**, and
