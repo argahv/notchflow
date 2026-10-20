@@ -62,6 +62,8 @@ import AppKit
             }
         case "status":
             let lines = model.providers.statuses.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.label)" }
+                + ["context: \(model.contextBoost.map(\.rawValue).sorted().joined(separator: ","))",
+                   "mode: \(model.preferences.mode?.title ?? "Custom")"]
             try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)
         case "dumpHooks":
             let folder = AppFiles.root.appendingPathComponent("debug", isDirectory: true)

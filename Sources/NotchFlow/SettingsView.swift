@@ -16,6 +16,19 @@ struct SettingsView: View {
     init(model: AppModel) { self.model = model; self.backdrop = model.backdrop; self.providers = model.providers }
     var body: some View {
         Form {
+            Section("Mode") {
+                Picker("Mode", selection: Binding(get: { preferences.mode }, set: { if let mode = $0 { preferences.apply(mode) } })) {
+                    ForEach(ProductMode.allCases) { mode in Text(mode.title).tag(Optional(mode)) }
+                    if preferences.mode == nil { Text("Custom").tag(ProductMode?.none) }
+                }
+                .pickerStyle(.segmented)
+                Text(preferences.mode?.summary ?? "Your own mix of settings. Choose a mode to reset them to a preset.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle(isOn: $preferences.contextAware) {
+                    Text("Follow the app in front")
+                    Text("Agents and builds rank higher in a terminal or editor, downloads in a browser, meetings in a calling app. It never opens the notch by itself.")
+                }
+            }
             Section("Workspace") {
                 Toggle("Show notch overlay", isOn: $preferences.overlayEnabled)
                 Toggle("Simulate a notch on displays without one", isOn: $preferences.simulatedNotch)

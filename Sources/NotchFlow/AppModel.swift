@@ -139,6 +139,15 @@ struct CommandItem: Identifiable {
         clipboard.$items.map(\.count).removeDuplicates().dropFirst()
             .sink { [weak self] _ in DispatchQueue.main.async { if self?.route == .tools(.clipboard) { self?.reflow() } } }
             .store(in: &subscriptions)
+        // Context: the frontmost app reorders the stack. Activation notifications only; no polling.
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
+            .compactMap { $0.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication }
+            .sink { [weak self] app in self?.updateContext(app) }
+            .store(in: &subscriptions)
+        preferences.$contextAware.dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.updateContext(NSWorkspace.shared.frontmostApplication) }
+        }.store(in: &subscriptions)
+        updateContext(NSWorkspace.shared.frontmostApplication)
         battery.$percent.combineLatest(battery.$charging).scan((Int?.none, Int?.none, false)) { state, next in (state.1, next.0, next.1) }
             .sink { [weak self] previous, current, charging in self?.batteryChanged(from: previous, to: current, charging: charging) }
             .store(in: &subscriptions)
@@ -613,6 +622,17 @@ struct CommandItem: Identifiable {
         }
     }
 
+    // MARK: Context
+
+    private func updateContext(_ app: NSRunningApplication?) {
+        // NotchFlow taking focus (typing in a note, the palette) keeps the previous context.
+        if app?.processIdentifier == ProcessInfo.processInfo.processIdentifier { return }
+        let boost = preferences.contextAware ? ContextRules.boost(forFrontmost: app?.bundleIdentifier) : []
+        guard boost != contextBoost else { return }
+        contextBoost = boost
+        if interaction.presentation != .expanded { reflow() }
+    }
+
     // MARK: System
 
     private func configureClipboard() {
@@ -788,6 +808,11 @@ struct CommandItem: Identifiable {
         }
         items += quickApps.map { app in
             CommandItem(id: "app-\(app.id)", title: "Open \(app.name)", symbol: "arrow.up.forward.app", hint: "App") { app.open() }
+        }
+        for mode in ProductMode.allCases where preferences.mode != mode {
+            items.append(CommandItem(id: "mode-\(mode.rawValue)", title: "Use \(mode.title) mode", symbol: "slider.horizontal.3", hint: "Mode") { [weak self] in
+                self?.preferences.apply(mode)
+            })
         }
         items.append(CommandItem(id: "quiet", title: preferences.quietMode ? "Turn off quiet mode" : "Turn on quiet mode", symbol: "bell.slash") { [weak self] in self?.preferences.quietMode.toggle() })
         items.append(CommandItem(id: "privacy", title: preferences.privacy ? "Show private details" : "Hide private details", symbol: "eye.slash") { [weak self] in self?.preferences.privacy.toggle() })

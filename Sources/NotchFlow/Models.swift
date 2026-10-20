@@ -68,12 +68,14 @@ struct QuickApp: Identifiable, Equatable {
     @Published var downloadsEnabled: Bool { didSet { save("downloadsEnabled", downloadsEnabled) } }
     @Published var meetingsEnabled: Bool { didSet { save("meetingsEnabled", meetingsEnabled) } }
     @Published var lowBatteryAlerts: Bool { didSet { save("lowBatteryAlerts", lowBatteryAlerts) } }
+    /// The app in front reorders the stack (never opens anything). See `ContextRules`.
+    @Published var contextAware: Bool { didSet { save("contextAware", contextAware) } }
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         defaults.register(defaults: ["overlayEnabled": true, "simulatedNotch": true,
                                     "bridgeEnabled": true, "notchWidth": 190.0, "hoverDelay": 0.12,
-                                    "showBattery": true, "historyRetentionDays": 30, "approvalWait": 25, "clipboardRetentionHours": 24,
+                                    "showBattery": true, "historyRetentionDays": 30, "approvalWait": 25, "clipboardRetentionHours": 24, "contextAware": true,
                                     "quickApps": ["com.apple.Terminal", "com.microsoft.VSCode", "com.apple.finder", "com.apple.Safari", "com.apple.Notes"]])
         overlayEnabled = defaults.bool(forKey: "overlayEnabled")
         simulatedNotch = defaults.bool(forKey: "simulatedNotch")
@@ -99,6 +101,19 @@ struct QuickApp: Identifiable, Equatable {
         downloadsEnabled = defaults.bool(forKey: "downloadsEnabled")
         meetingsEnabled = defaults.bool(forKey: "meetingsEnabled")
         lowBatteryAlerts = defaults.bool(forKey: "lowBatteryAlerts")
+        contextAware = defaults.bool(forKey: "contextAware")
+    }
+
+    var modeSettings: ModeSettings {
+        ModeSettings(quietMode: quietMode, showBattery: showBattery, contextAware: contextAware, hoverDelay: hoverDelay,
+                     github: githubEnabled)
+    }
+    /// The preset these settings match, or nil when they've been customized.
+    var mode: ProductMode? { ProductMode.matching(modeSettings) }
+    func apply(_ mode: ProductMode) {
+        let settings = mode.settings
+        quietMode = settings.quietMode; showBattery = settings.showBattery; contextAware = settings.contextAware
+        hoverDelay = settings.hoverDelay; githubEnabled = settings.github
     }
     private func save(_ key: String, _ value: Any) { defaults.set(value, forKey: key) }
 }
