@@ -204,7 +204,7 @@ struct ActivityCapsule: View {
                         .help("Brings \(host.name) forward; NotchFlow can't pick the tab or type for you")
                 }
                 if event.actionURL != nil {
-                    Button { model.openAction(record) } label: { Label("Open", systemImage: "arrow.up.forward") }
+                    Button { model.openAction(record) } label: { Label(model.actionTitle(record), systemImage: event.kind == .download ? "folder" : "arrow.up.forward") }
                         .buttonStyle(PillButtonStyle(prominent: true, tone: event.lifecycle == .failed ? .coral : .iris))
                 }
                 if !event.lifecycle.terminal {

@@ -51,6 +51,15 @@ import AppKit
         case "filter": if let filter = AppModel.ActivityFilter(rawValue: argument) { model.setFilter(filter) }
         case "hide": if let record = model.record(argument) { model.hideFromStack(record) }
         case "pinRecord": if let record = model.record(argument) { model.togglePin(record) }
+        case "clip":
+            // "clip:<text>" or "clip:1password:<text>" (as if copied in a password manager).
+            if argument.hasPrefix("1password:") {
+                model.clipboard.consider(String(argument.dropFirst(10)), types: [], app: "com.1password.1password", appName: "1Password")
+            } else if argument.hasPrefix("concealed:") {
+                model.clipboard.consider(String(argument.dropFirst(10)), types: ["org.nspasteboard.ConcealedType"], app: nil, appName: nil)
+            } else {
+                model.clipboard.consider(argument.replacingOccurrences(of: "\\n", with: "\n"), types: [], app: "com.apple.dt.Xcode", appName: "Xcode")
+            }
         case "status":
             let lines = model.providers.statuses.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.label)" }
             try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)

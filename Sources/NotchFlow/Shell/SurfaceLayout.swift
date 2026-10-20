@@ -34,6 +34,11 @@ enum Metrics {
     static let sectionLabel = 20.0
     static let appTile = 72.0
     static let appsPerRow = 5
+    static let tilesPerRow = 5
+    static let clipRow = 40.0
+    static let maxClipRows = 6
+    static let deviceRow = 34.0
+    static let metricRow = 28.0
     static let filesPerRow = 5
     static let maxNoteRows = 5
     static let maxTodoRows = 8
@@ -107,7 +112,7 @@ enum Metrics {
             if model.shelf.removed != nil || model.shelf.error != nil { height += Metrics.gap + 26 }
             return height + pad
         case .tools(nil):
-            return pad + stack(2, Metrics.tile) + pad
+            return pad + stack((Tool.allCases.count + Metrics.tilesPerRow - 1) / Metrics.tilesPerRow, Metrics.tile) + pad
         case .tools(let tool?):
             return pad + Metrics.header + 10 + toolHeight(tool, snapshot, model) + pad
         case .history(let detail):
@@ -152,6 +157,15 @@ enum Metrics {
             return 84
         case .shortcuts:
             return 88
+        case .clipboard:
+            guard model.clipboard.enabled else { return Metrics.emptyRow + Metrics.gap + 26 }
+            let count = model.clipboard.items.count
+            let list = count == 0 ? 40 : stack(min(count, Metrics.maxClipRows), Metrics.clipRow, gap: 4)
+            return list + (model.clipboard.skipped > 0 || count > 0 ? Metrics.gap + 20 : 0)
+        case .sound:
+            return stack(max(1, min(model.audioOutputs.count, 6)), Metrics.deviceRow, gap: 4)
+        case .system:
+            return stack(4, Metrics.metricRow, gap: 4)
         }
     }
 

@@ -104,6 +104,34 @@ struct SettingsView: View {
                 Text("Camera, Calendar and Reminders are connected explicitly from Tools. No microphone or Accessibility access is required.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Clipboard, downloads and meetings") {
+                Toggle(isOn: $preferences.clipboardEnabled) {
+                    Text("Clipboard history")
+                    Text("Text only, kept in memory and gone when NotchFlow quits. Copies from password managers or marked concealed are skipped, as is text that looks like a key or password. That check is best effort and can miss secrets.")
+                }
+                Picker("Keep clipboard items for", selection: $preferences.clipboardRetentionHours) {
+                    Text("1 hour").tag(1); Text("8 hours").tag(8); Text("1 day").tag(24); Text("1 week").tag(168)
+                }
+                .disabled(!preferences.clipboardEnabled)
+                Toggle(isOn: $preferences.downloadsEnabled) {
+                    Text("Download Center")
+                    Text("Follows your Downloads folder: in-progress browser downloads with their size so far, then the finished file. macOS asks for access to Downloads the first time.")
+                }
+                Toggle(isOn: $preferences.meetingsEnabled) {
+                    Text("Meeting reminders")
+                    Text("Calls with a Zoom, Meet, Teams, Webex, Whereby or FaceTime link appear ten minutes ahead, with Join. Uses the Calendar access you grant in Tools.")
+                }
+                Toggle(isOn: $preferences.lowBatteryAlerts) {
+                    Text("Low battery alerts")
+                    Text("Once each at 20%, 10% and 5% while unplugged.")
+                }
+                ForEach(["downloads", "meetings"], id: \.self) { identifier in
+                    if let status = providers.statuses[identifier], status != .off {
+                        LabeledContent(identifier == "downloads" ? "Download Center" : "Meetings", value: status.label)
+                            .foregroundStyle(status.isFailure ? .orange : .secondary)
+                    }
+                }
+            }
             Section("Agents") {
                 Toggle(isOn: $preferences.agentApprovals) {
                     Text("Answer permission requests from the notch")

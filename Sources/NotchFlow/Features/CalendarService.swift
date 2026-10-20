@@ -4,6 +4,10 @@ import Combine
 
 struct CalendarItem: Identifiable {
     var id: String; var title: String; var date: Date; var url: URL?
+    var end: Date = .distantFuture
+    /// A recognized video-call link from the event's URL, location or notes (see `MeetingLinks`).
+    var joinURL: URL?
+    var service: String?
 }
 @MainActor final class CalendarService: ObservableObject {
     @Published var events: [CalendarItem] = []
@@ -31,8 +35,10 @@ struct CalendarItem: Identifiable {
         if EKEventStore.authorizationStatus(for: .event) == .fullAccess {
             let now = Date(), end = now.addingTimeInterval(86400)
             events = store.events(matching: store.predicateForEvents(withStart: now, end: end, calendars: nil))
-                .filter { $0.endDate > now }.sorted { $0.startDate < $1.startDate }.prefix(8).map {
-                    CalendarItem(id: $0.eventIdentifier ?? UUID().uuidString, title: $0.title ?? "Event", date: $0.startDate, url: $0.url)
+                .filter { $0.endDate > now && !$0.isAllDay }.sorted { $0.startDate < $1.startDate }.prefix(8).map { event in
+                    let join = MeetingLinks.join(in: [event.url?.absoluteString, event.location, event.notes])
+                    return CalendarItem(id: event.eventIdentifier ?? UUID().uuidString, title: event.title ?? "Event", date: event.startDate,
+                                        url: event.url, end: event.endDate, joinURL: join?.url, service: join?.service)
                 }
         } else { events = [] }
         if EKEventStore.authorizationStatus(for: .reminder) == .fullAccess {

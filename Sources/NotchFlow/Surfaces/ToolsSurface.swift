@@ -23,16 +23,17 @@ struct ToolsSurface: View {
 private struct Launcher: View {
     @ObservedObject var model: AppModel
     var body: some View {
-        let rows = [Array(Tool.allCases.prefix(4)), Array(Tool.allCases.dropFirst(4))]
+        let perRow = Metrics.tilesPerRow
+        let rows = stride(from: 0, to: Tool.allCases.count, by: perRow).map { Array(Tool.allCases[$0..<min($0 + perRow, Tool.allCases.count)]) }
         VStack(spacing: Metrics.gap) {
             ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, tools in
                 HStack(spacing: Metrics.gap) {
                     ForEach(Array(tools.enumerated()), id: \.element) { index, tool in
                         ToolTile(tool: tool) { model.navigate(.tools(tool)) }
-                            .reveal(.primary, stagger: Double(rowIndex * 4 + index) * 0.022)
+                            .reveal(.primary, stagger: Double(rowIndex * perRow + index) * 0.022)
                     }
-                    // Keep the second row's tiles the same width as the first.
-                    ForEach(0..<(4 - tools.count), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity) }
+                    // Keep a short last row's tiles the same width as the others.
+                    ForEach(0..<(perRow - tools.count), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity) }
                 }
             }
         }
@@ -49,6 +50,7 @@ private struct ToolTile: View {
             VStack(spacing: 7) {
                 Image(systemName: tool.symbol)
                     .font(.system(size: 17, weight: .medium)).foregroundStyle(Ink.iris)
+                    .frame(height: 22)   // symbols differ in height; titles share one baseline
                     .scaleEffect(hovering ? 1.07 : 1)
                     .nookMatched("tile-icon-\(tool.rawValue)", in: namespace)
                 Text(tool.title).font(.system(size: 11.5, weight: .medium)).foregroundStyle(Ink.primary).lineLimit(1)
@@ -88,6 +90,9 @@ private struct ToolPanel: View {
                 case .apps: AppsBody(model: model)
                 case .timer: TimerBody(model: model, clock: model.clock)
                 case .shortcuts: ShortcutsBody()
+                case .clipboard: ClipboardBody(model: model, clipboard: model.clipboard)
+                case .sound: SoundBody(model: model)
+                case .system: SystemBody()
                 }
             }
             .reveal(.primary, stagger: 0.04)
@@ -135,6 +140,10 @@ private struct ToolPanel: View {
             } else {
                 Button { model.newNote() } label: { Image(systemName: "square.and.pencil") }
                     .buttonStyle(IconButtonStyle(size: 24)).help("New note").accessibilityLabel("New note")
+            }
+        case .clipboard:
+            if model.clipboard.enabled, !model.clipboard.items.isEmpty {
+                Button("Clear") { model.clearClipboard() }.buttonStyle(PillButtonStyle()).help("Removes everything except pinned items")
             }
         case .calendar:
             if model.calendar.connected, EKEventStore.authorizationStatus(for: .reminder) != .fullAccess {
@@ -435,5 +444,163 @@ private struct ShortcutsBody: View {
             Spacer(minLength: 0)
         }
         .frame(height: 88, alignment: .top)
+    }
+}
+
+// MARK: - Clipboard
+
+private struct ClipboardBody: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var clipboard: ClipboardService
+    var body: some View {
+        VStack(alignment: .leading, spacing: Metrics.gap) {
+            if !clipboard.enabled {
+                CompactEmptyState(symbol: "doc.on.clipboard", tone: .neutral, title: "Clipboard history is off",
+                                  detail: "Text you copy is kept in memory only, and never from password managers.")
+                    .frame(height: Metrics.emptyRow)
+                Button("Turn on clipboard history") { model.preferences.clipboardEnabled = true }
+                    .buttonStyle(PillButtonStyle(prominent: true)).frame(height: 26)
+            } else if clipboard.items.isEmpty {
+                Text("Copy some text and it appears here.").font(TypeScale.secondary).foregroundStyle(Ink.secondary).frame(height: 40)
+            } else {
+                ScrollView(.vertical) {
+                    VStack(spacing: 4) {
+                        ForEach(clipboard.items) { item in ClipRow(model: model, item: item).transition(.row) }
+                    }
+                }
+                .frame(height: min(Double(clipboard.items.count), Double(Metrics.maxClipRows)) * (Metrics.clipRow + 4) - 4)
+            }
+            if clipboard.enabled, clipboard.skipped > 0 || !clipboard.items.isEmpty {
+                Text(clipboard.skipped > 0 ? "\(clipboard.skipped) skipped: password manager, concealed or likely secret. Detection is best effort."
+                                           : "Click an item to copy it again. Kept for \(model.preferences.clipboardRetentionHours) h, in memory only.")
+                    .font(TypeScale.meta).foregroundStyle(Ink.secondary).lineLimit(1).frame(height: 20)
+            }
+        }
+        .animation(Motion.quick, value: clipboard.items.count)
+    }
+}
+
+private struct ClipRow: View {
+    @ObservedObject var model: AppModel
+    let item: ClipItem
+    @State private var hovering = false
+    @State private var copied = false
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.secondary).frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " "))
+                    .font(item.kind == .code ? .system(size: 12, design: .monospaced) : TypeScale.body)
+                    .foregroundStyle(Ink.primary).lineLimit(1)
+                Text([item.source, item.date.formatted(date: .omitted, time: .shortened)].compactMap { $0 }.joined(separator: " · "))
+                    .font(TypeScale.meta).foregroundStyle(Ink.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            if copied { Text("Copied").font(TypeScale.badge).foregroundStyle(Ink.mint).transition(.opacity) }
+            if hovering || item.pinned {
+                Button { model.clipboard.togglePin(item) } label: { Image(systemName: item.pinned ? "pin.fill" : "pin") }
+                    .buttonStyle(IconButtonStyle(size: 24, tint: item.pinned ? Ink.primary : Ink.secondary))
+                    .accessibilityLabel(item.pinned ? "Unpin" : "Pin")
+            }
+            if hovering {
+                Button { model.clipboard.remove(item) } label: { Image(systemName: "xmark") }
+                    .buttonStyle(IconButtonStyle(size: 24, tint: Ink.secondary)).accessibilityLabel("Remove")
+            }
+        }
+        .padding(.horizontal, 10).frame(height: Metrics.clipRow)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(hovering ? Ink.elevated : Ink.surface.opacity(0.6)))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            model.clipboard.copy(item)
+            withAnimation(Motion.micro) { copied = true }
+        }
+        .task(id: copied) {
+            guard copied else { return }
+            try? await Task.sleep(for: .seconds(1.2))
+            withAnimation(Motion.micro) { copied = false }
+        }
+        .onHover { hovering = $0 }
+        .animation(Motion.micro, value: hovering)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Copies this item to the clipboard")
+        .accessibilityAddTraits(.isButton)
+    }
+    private var symbol: String {
+        switch item.kind {
+        case .link: "link"
+        case .email: "envelope"
+        case .color: "paintpalette"
+        case .code: "chevron.left.forwardslash.chevron.right"
+        case .text: "text.alignleft"
+        }
+    }
+}
+
+// MARK: - Sound
+
+private struct SoundBody: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        VStack(spacing: 4) {
+            if model.audioOutputs.isEmpty {
+                Text("No sound output devices found.").font(TypeScale.secondary).foregroundStyle(Ink.secondary).frame(height: Metrics.deviceRow)
+            }
+            ForEach(model.audioOutputs.prefix(6)) { device in
+                let selected = model.defaultAudioOutput == device.id
+                Button { model.selectAudioOutput(device) } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: selected ? "checkmark.circle.fill" : "speaker.wave.2")
+                            .foregroundStyle(selected ? Ink.primary : Ink.secondary).frame(width: 18)
+                        Text(device.name).font(TypeScale.body).foregroundStyle(Ink.primary).lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10).frame(height: Metrics.deviceRow)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(selected ? Ink.elevated : Ink.surface.opacity(0.6)))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .onAppear { model.refreshAudioOutputs() }
+    }
+}
+
+// MARK: - System
+
+/// Sampled every two seconds while visible; nothing runs when it's closed.
+private struct SystemBody: View {
+    @State private var metrics = SystemMetrics()
+    @State private var sample: SystemSample?
+    var body: some View {
+        VStack(spacing: 4) {
+            row("CPU", sample?.cpu.map { "\(Int(($0 * 100).rounded()))%" } ?? "Measuring…")
+            row("Memory used", sample.map { "\(DownloadNames.size(Int64($0.memoryUsed))) of \(DownloadNames.size(Int64($0.memoryTotal)))" } ?? "…")
+            row("Thermal state", sample.map { thermal($0.thermal) } ?? "…")
+            row("Up for", sample.map { uptime($0.uptime) } ?? "…")
+        }
+        .task {
+            while !Task.isCancelled {
+                sample = metrics.sample()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+    private func row(_ title: String, _ value: String) -> some View {
+        HStack {
+            Text(title).font(TypeScale.body).foregroundStyle(Ink.secondary)
+            Spacer()
+            Text(value).font(TypeScale.numeral).foregroundStyle(Ink.primary).contentTransition(.numericText())
+        }
+        .padding(.horizontal, 10).frame(height: Metrics.metricRow)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Ink.surface.opacity(0.6)))
+        .accessibilityElement(children: .combine)
+    }
+    private func thermal(_ state: ProcessInfo.ThermalState) -> String {
+        switch state { case .nominal: "Normal"; case .fair: "Warm"; case .serious: "Hot"; case .critical: "Critical"; @unknown default: "Unknown" }
+    }
+    private func uptime(_ seconds: TimeInterval) -> String {
+        let hours = Int(seconds) / 3600
+        return hours >= 24 ? "\(hours / 24) d \(hours % 24) h" : "\(hours) h \(Int(seconds) % 3600 / 60) min"
     }
 }

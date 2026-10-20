@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import Combine
+import CoreAudio
 
 /// One-second clock that runs only while something on screen counts down. Views that show time
 /// observe this instead of the model, so the rest of the surface never redraws on a tick.
@@ -92,6 +93,11 @@ struct CommandItem: Identifiable {
     private let queueURL = AppFiles.root.appendingPathComponent("activities.json")
     let approvals = AgentApprovals()
     let github = GitHubActionsProvider()
+    let clipboard = ClipboardService()
+    let downloads = DownloadsProvider()
+    private(set) lazy var meetings = MeetingProvider(calendar: calendar)
+    @Published private(set) var audioOutputs: [AudioOutput] = []
+    @Published private(set) var defaultAudioOutput: AudioDeviceID?
 
     init(preferences: Preferences) {
         self.preferences = preferences
@@ -115,6 +121,27 @@ struct CommandItem: Identifiable {
         preferences.$githubRepositories.dropFirst().sink { [weak self] repositories in
             self?.github.repositories = repositories
         }.store(in: &subscriptions)
+        for provider in [downloads, meetings] as [any ActivityProvider] { providers.register(provider) }
+        providers.setEnabled(downloads.identifier, preferences.downloadsEnabled)
+        providers.setEnabled(meetings.identifier, preferences.meetingsEnabled)
+        preferences.$downloadsEnabled.dropFirst().sink { [weak self] enabled in
+            guard let self else { return }
+            self.providers.setEnabled(self.downloads.identifier, enabled)
+        }.store(in: &subscriptions)
+        preferences.$meetingsEnabled.dropFirst().sink { [weak self] enabled in
+            guard let self else { return }
+            self.providers.setEnabled(self.meetings.identifier, enabled)
+        }.store(in: &subscriptions)
+        configureClipboard()
+        preferences.$clipboardEnabled.combineLatest(preferences.$clipboardRetentionHours).dropFirst()
+            .sink { [weak self] _, _ in DispatchQueue.main.async { self?.configureClipboard(); self?.reflow() } }
+            .store(in: &subscriptions)
+        clipboard.$items.map(\.count).removeDuplicates().dropFirst()
+            .sink { [weak self] _ in DispatchQueue.main.async { if self?.route == .tools(.clipboard) { self?.reflow() } } }
+            .store(in: &subscriptions)
+        battery.$percent.combineLatest(battery.$charging).scan((Int?.none, Int?.none, false)) { state, next in (state.1, next.0, next.1) }
+            .sink { [weak self] previous, current, charging in self?.batteryChanged(from: previous, to: current, charging: charging) }
+            .store(in: &subscriptions)
         clock.onTick = { [weak self] date in self?.tick(date) }
         clock.run(countdown.running)
         preferences.$bridgeEnabled.dropFirst().sink { [weak self] enabled in
@@ -143,7 +170,7 @@ struct CommandItem: Identifiable {
             .store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.synchronizeServices(); self?.objectWillChange.send() }
+            .sink { [weak self] _ in self?.synchronizeServices(); self?.configureClipboard(); self?.objectWillChange.send() }
             .store(in: &subscriptions)
         scheduleExpiryRefresh()
     }
@@ -566,8 +593,55 @@ struct CommandItem: Identifiable {
     func openAction(_ record: ActivityRecord) {
         guard let string = record.event.actionURL, let url = URL(string: string) else { return }
         do { try record.event.validate() } catch { message = error.localizedDescription; return }
-        // Actions never run automatically. No arbitrary shell commands are accepted.
+        // Actions never run automatically. No arbitrary shell commands are accepted. A downloaded
+        // file is revealed, not opened: opening an unknown download is the person's decision.
+        if url.isFileURL, record.event.kind == .download {
+            if FileManager.default.fileExists(atPath: url.path) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            else { message = "That file is no longer in Downloads." }
+            return
+        }
         NSWorkspace.shared.open(url)
+    }
+
+    /// The action button's label, from what the action does.
+    func actionTitle(_ record: ActivityRecord) -> String {
+        switch record.event.kind {
+        case .meeting: "Join"
+        case .download: "Show in Finder"
+        case .ci: "Open run"
+        default: "Open"
+        }
+    }
+
+    // MARK: System
+
+    private func configureClipboard() {
+        clipboard.configure(enabled: preferences.clipboardEnabled, retention: Double(max(1, preferences.clipboardRetentionHours)) * 3600,
+                            lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+    }
+    func clearClipboard() { clipboard.clear(); reflow() }
+
+    func refreshAudioOutputs() {
+        audioOutputs = AudioDevices.outputs()
+        defaultAudioOutput = AudioDevices.defaultOutput()
+        reflow()
+    }
+    func selectAudioOutput(_ device: AudioOutput) {
+        if AudioDevices.setDefaultOutput(device.id) { defaultAudioOutput = device.id }
+        else { message = "macOS didn't switch to \(device.name)." }
+    }
+
+    private func batteryChanged(from previous: Int?, to current: Int?, charging: Bool) {
+        guard preferences.lowBatteryAlerts, let current else { return }
+        let id = "battery-low"
+        if charging, let record = record("system:" + id), !record.event.lifecycle.terminal {
+            ingest(ActivityEvent(source: "system", activityId: id, state: .cancelled, title: record.event.title, category: .system, summary: "Charging"))
+            return
+        }
+        guard let threshold = BatteryAlerts.crossed(from: previous, to: current, charging: charging) else { return }
+        ingest(ActivityEvent(source: "system", activityId: id, state: .waiting, title: "Battery at \(current)%", category: .system,
+                             summary: threshold <= 5 ? "Your Mac will sleep soon. Connect power." : "Connect power soon.",
+                             expiresAt: Date().addingTimeInterval(1800)))
     }
 
     private func applyRetention() {

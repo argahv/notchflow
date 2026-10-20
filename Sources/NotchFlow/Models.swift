@@ -62,12 +62,18 @@ struct QuickApp: Identifiable, Equatable {
     /// `owner/name` repositories whose GitHub Actions runs appear in the stack.
     @Published var githubRepositories: [String] { didSet { save("githubRepositories", githubRepositories) } }
     @Published var githubEnabled: Bool { didSet { save("githubEnabled", githubEnabled) } }
+    /// Off by default. Text only, in memory, never written to disk.
+    @Published var clipboardEnabled: Bool { didSet { save("clipboardEnabled", clipboardEnabled) } }
+    @Published var clipboardRetentionHours: Int { didSet { save("clipboardRetentionHours", clipboardRetentionHours) } }
+    @Published var downloadsEnabled: Bool { didSet { save("downloadsEnabled", downloadsEnabled) } }
+    @Published var meetingsEnabled: Bool { didSet { save("meetingsEnabled", meetingsEnabled) } }
+    @Published var lowBatteryAlerts: Bool { didSet { save("lowBatteryAlerts", lowBatteryAlerts) } }
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         defaults.register(defaults: ["overlayEnabled": true, "simulatedNotch": true,
                                     "bridgeEnabled": true, "notchWidth": 190.0, "hoverDelay": 0.12,
-                                    "showBattery": true, "historyRetentionDays": 30, "approvalWait": 25,
+                                    "showBattery": true, "historyRetentionDays": 30, "approvalWait": 25, "clipboardRetentionHours": 24,
                                     "quickApps": ["com.apple.Terminal", "com.microsoft.VSCode", "com.apple.finder", "com.apple.Safari", "com.apple.Notes"]])
         overlayEnabled = defaults.bool(forKey: "overlayEnabled")
         simulatedNotch = defaults.bool(forKey: "simulatedNotch")
@@ -88,6 +94,11 @@ struct QuickApp: Identifiable, Equatable {
         approvalWait = defaults.integer(forKey: "approvalWait")
         githubRepositories = defaults.stringArray(forKey: "githubRepositories") ?? []
         githubEnabled = defaults.bool(forKey: "githubEnabled")
+        clipboardEnabled = defaults.bool(forKey: "clipboardEnabled")
+        clipboardRetentionHours = defaults.integer(forKey: "clipboardRetentionHours")
+        downloadsEnabled = defaults.bool(forKey: "downloadsEnabled")
+        meetingsEnabled = defaults.bool(forKey: "meetingsEnabled")
+        lowBatteryAlerts = defaults.bool(forKey: "lowBatteryAlerts")
     }
     private func save(_ key: String, _ value: Any) { defaults.set(value, forKey: key) }
 }

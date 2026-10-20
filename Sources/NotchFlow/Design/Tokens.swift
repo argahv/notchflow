@@ -192,6 +192,10 @@ enum ActivityText {
         if let agent = event.agent, let state = agent.state {
             return [event.project, state.label(tool: agent.tool)].compactMap { $0 }.joined(separator: " · ")
         }
+        // Downloads, meetings and system notices say what matters in their summary ("4.8 MB so far").
+        if [.download, .meeting, .system].contains(event.kind), let summary = event.summary, !summary.isEmpty {
+            return event.lifecycle.terminal ? "\(summary) · \(event.lifecycle.label)" : summary
+        }
         return [event.source, event.branch, event.lifecycle.label].compactMap { $0 }.joined(separator: " · ")
     }
 }
