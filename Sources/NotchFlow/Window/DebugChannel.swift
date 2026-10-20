@@ -60,6 +60,12 @@ import AppKit
             } else {
                 model.clipboard.consider(argument.replacingOccurrences(of: "\\n", with: "\n"), types: [], app: "com.apple.dt.Xcode", appName: "Xcode")
             }
+        case "snapshot":
+            // "snapshot:<name>" or "snapshot:<name>:light"
+            let parts = argument.split(separator: ":").map(String.init)
+            if let name = parts.first, name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) {
+                windows.snapshot(to: AppFiles.root.appendingPathComponent("debug/\(name).png"), light: parts.dropFirst().first == "light")
+            }
         case "status":
             let lines = model.providers.statuses.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.label)" }
                 + ["context: \(model.contextBoost.map(\.rawValue).sorted().joined(separator: ","))",

@@ -167,6 +167,28 @@ import Carbon
     }
     func beginTransition() -> Int { transitions += 1; return transitions }
     func isLatest(_ transition: Int) -> Bool { transition == transitions }
+
+    #if DEBUG
+    /// Scripted QA: renders the live overlay offscreen at its current form, on a backdrop that
+    /// stands in for the menu bar and desktop. Works while the display sleeps. Native blur isn't
+    /// captured by ImageRenderer, so this checks layout, colour and shape, not translucency.
+    func snapshot(to url: URL, light: Bool) {
+        let size = model.form.size
+        let canvas = CGSize(width: max(size.width + 120, 640), height: size.height + 80)
+        let view = ZStack(alignment: .top) {
+            Color(white: light ? 0.93 : 0.16)
+            Color(white: light ? 0.84 : 0.08).frame(height: model.geometry.band)
+            OverlayView(model: model).environmentObject(model.preferences).modelContainer(container)
+                .frame(width: size.width, height: size.height)
+        }
+        .frame(width: canvas.width, height: canvas.height, alignment: .top)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 2
+        guard let image = renderer.cgImage,
+              let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return }
+        try? data.write(to: url)
+    }
+    #endif
     /// After the latest transition settles, trim the panel back to the silhouette.
     func settle(_ transition: Int) {
         guard transition == transitions, panel.isVisible, !suspended else { return }
