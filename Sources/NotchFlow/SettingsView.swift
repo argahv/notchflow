@@ -211,7 +211,7 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Diagnostics") {
-                LabeledContent("Version", value: "0.1.0 · Developer preview")
+                LabeledContent("Version", value: Self.version)
                 LabeledContent("Event bridge", value: model.bridge.status)
                 LabeledContent("Stored activities", value: String(model.queue.records.count))
                 Button("Open local data folder") { NSWorkspace.shared.open(AppFiles.root) }
@@ -234,6 +234,12 @@ struct SettingsView: View {
             Text(title)
             Text(detail)
         }
+    }
+    private static var version: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "\(short) (\(build)) · Developer preview"
     }
     private func permissionRow(_ title: String, status: String, pane: String) -> some View {
         LabeledContent(title) {
