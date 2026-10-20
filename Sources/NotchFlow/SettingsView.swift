@@ -1,6 +1,8 @@
 import SwiftUI
 import ServiceManagement
 import UniformTypeIdentifiers
+import EventKit
+import AVFoundation
 
 struct SettingsView: View {
     @ObservedObject var model: AppModel
@@ -200,6 +202,14 @@ struct SettingsView: View {
                     LabeledContent("Status", value: status.label).foregroundStyle(status.isFailure ? .orange : .secondary)
                 }
             }
+            Section("Permissions") {
+                permissionRow("Calendar", status: Self.eventKitStatus(.event), pane: "Privacy_Calendars")
+                permissionRow("Reminders", status: Self.eventKitStatus(.reminder), pane: "Privacy_Reminders")
+                permissionRow("Camera (Mirror)", status: Self.cameraStatus, pane: "Privacy_Camera")
+                permissionRow("Downloads folder", status: downloadsStatus, pane: "Privacy_FilesAndFolders")
+                Text("NotchFlow asks for each of these only when you turn on the feature that needs it. It never needs Accessibility, Screen Recording (except Ultra visuals) or the microphone.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Diagnostics") {
                 LabeledContent("Version", value: "0.1.0 · Developer preview")
                 LabeledContent("Event bridge", value: model.bridge.status)
@@ -223,6 +233,43 @@ struct SettingsView: View {
         } label: {
             Text(title)
             Text(detail)
+        }
+    }
+    private func permissionRow(_ title: String, status: String, pane: String) -> some View {
+        LabeledContent(title) {
+            HStack {
+                Text(status).foregroundStyle(.secondary)
+                Button("Open System Settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") { NSWorkspace.shared.open(url) }
+                }
+            }
+        }
+    }
+    private static func eventKitStatus(_ type: EKEntityType) -> String {
+        switch EKEventStore.authorizationStatus(for: type) {
+        case .fullAccess: "Allowed"
+        case .writeOnly: "Add only"
+        case .denied: "Denied"
+        case .restricted: "Restricted"
+        case .notDetermined: "Not asked"
+        @unknown default: "Unknown"
+        }
+    }
+    private static var cameraStatus: String {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: "Allowed"
+        case .denied: "Denied"
+        case .restricted: "Restricted"
+        case .notDetermined: "Not asked"
+        @unknown default: "Unknown"
+        }
+    }
+    /// macOS doesn't report Files and Folders access to apps; the Download Center's own status does.
+    private var downloadsStatus: String {
+        switch providers.statuses["downloads"] {
+        case .running?: "Allowed"
+        case .failed?: "Not allowed"
+        default: "Not in use"
         }
     }
     private func addRepository() {
