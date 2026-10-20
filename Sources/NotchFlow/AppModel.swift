@@ -91,6 +91,7 @@ struct CommandItem: Identifiable {
     private var subscriptions = Set<AnyCancellable>()
     private let queueURL = AppFiles.root.appendingPathComponent("activities.json")
     let approvals = AgentApprovals()
+    let github = GitHubActionsProvider()
 
     init(preferences: Preferences) {
         self.preferences = preferences
@@ -104,6 +105,16 @@ struct CommandItem: Identifiable {
         inbox.onError = { [weak self] error in self?.message = error }
         providers.register(inbox)
         providers.setEnabled(inbox.identifier, preferences.bridgeEnabled)
+        github.repositories = preferences.githubRepositories
+        providers.register(github)
+        providers.setEnabled(github.identifier, preferences.githubEnabled)
+        preferences.$githubEnabled.dropFirst().sink { [weak self] enabled in
+            guard let self else { return }
+            self.providers.setEnabled(self.github.identifier, enabled)
+        }.store(in: &subscriptions)
+        preferences.$githubRepositories.dropFirst().sink { [weak self] repositories in
+            self?.github.repositories = repositories
+        }.store(in: &subscriptions)
         clock.onTick = { [weak self] date in self?.tick(date) }
         clock.run(countdown.running)
         preferences.$bridgeEnabled.dropFirst().sink { [weak self] enabled in
@@ -382,7 +393,7 @@ struct CommandItem: Identifiable {
             persistQueue()
             let updated = record(event.key)?.event
             let order = interaction.presentation == .expanded ? stackPlacement(for: event.key, prior: prior) : nil
-            if updated == event && prior != event { deliver(event) }
+            if updated == event && event.isMaterialChange(from: prior) { deliver(event) }
             if let record = record(event.key), [.completed, .cancelled].contains(record.event.lifecycle),
                workspaceActivityIDs.contains(record.id), !record.isPinned { scheduleRetraction(record.id) }
             scheduleExpiryRefresh()

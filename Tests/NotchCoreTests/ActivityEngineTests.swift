@@ -56,6 +56,19 @@ final class ActivityEngineTests: XCTestCase {
         XCTAssertEqual(try ActivityEvent.decoder().decode(ActivityEvent.self, from: ActivityEvent.encoder().encode(event)), event)
     }
 
+    func testOnlyMaterialChangesAreNews() {
+        let running = agentEvent(.running)
+        XCTAssertTrue(running.isMaterialChange(from: nil))
+        var heartbeat = running; heartbeat.timestamp += 30; heartbeat.expiresAt = now.addingTimeInterval(900); heartbeat.progress = 0.5
+        heartbeat.agent?.state = .executingTool; heartbeat.agent?.tool = "Bash"
+        XCTAssertFalse(heartbeat.isMaterialChange(from: running), "heartbeats and tool updates are quiet")
+        XCTAssertTrue(agentEvent(.needsInput).isMaterialChange(from: running))
+        let request = ActivityRequest(id: String(repeating: "a", count: 32), nonce: String(repeating: "b", count: 32), tool: "Bash", expiresAt: now + 30)
+        let asking = agentEvent(.needsInput, request: request)
+        XCTAssertTrue(asking.isMaterialChange(from: agentEvent(.needsInput)), "a new request is news")
+        XCTAssertFalse(agentEvent(.needsInput).isMaterialChange(from: asking), "a withdrawn request doesn't alert again")
+    }
+
     func testFailuresStayInTheStackForAnHourAndCompletionsLeave() throws {
         var queue = ActivityQueue()
         try queue.ingest(agentEvent(.failed), now: now)

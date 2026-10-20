@@ -6,9 +6,14 @@ struct SettingsView: View {
     @ObservedObject var model: AppModel
     @EnvironmentObject var preferences: Preferences
     @ObservedObject private var backdrop: BackdropService
+    @ObservedObject private var providers: ProviderHub
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
-    init(model: AppModel) { self.model = model; self.backdrop = model.backdrop }
+    @State private var newRepository = ""
+    @State private var tokenDraft = ""
+    @State private var tokenSaved = GitHubToken.exists
+    @State private var githubError: String?
+    init(model: AppModel) { self.model = model; self.backdrop = model.backdrop; self.providers = model.providers }
     var body: some View {
         Form {
             Section("Workspace") {
@@ -116,6 +121,44 @@ struct SettingsView: View {
                 Text("NotchFlow doesn't edit agent settings or type into terminals. Prompts, replies and tool input stay out of History; a pending request's command is shown only while it waits.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("GitHub Actions") {
+                Toggle(isOn: $preferences.githubEnabled) {
+                    Text("Follow workflow runs")
+                    Text("Polled over GitHub's REST API, read-only. With a token, running builds update every 15 seconds; without one, public repositories only, about once a minute.")
+                }
+                ForEach(preferences.githubRepositories, id: \.self) { repository in
+                    LabeledContent(repository) {
+                        Button("Remove") { preferences.githubRepositories.removeAll { $0 == repository } }
+                    }
+                }
+                HStack {
+                    TextField("owner/name or a github.com link", text: $newRepository).onSubmit(addRepository)
+                    Button("Add", action: addRepository).disabled(GitHubSettings.repository(from: newRepository) == nil)
+                }
+                if tokenSaved {
+                    LabeledContent("Token") {
+                        HStack {
+                            Text("Saved in Keychain").foregroundStyle(.secondary)
+                            Button("Remove") { GitHubToken.delete(); tokenSaved = false; model.github.restart() }
+                        }
+                    }
+                } else {
+                    HStack {
+                        SecureField("Token (optional)", text: $tokenDraft)
+                        Button("Save to Keychain") {
+                            do { try GitHubToken.save(tokenDraft); tokenDraft = ""; tokenSaved = true; githubError = nil; model.github.restart() }
+                            catch { githubError = error.localizedDescription }
+                        }
+                        .disabled(tokenDraft.isEmpty)
+                    }
+                    Text("Use a fine-grained token limited to the repositories above, with read-only Actions access. It's kept in your login Keychain on this Mac and only sent to api.github.com.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if let githubError { Text(githubError).font(.caption).foregroundStyle(.orange) }
+                if preferences.githubEnabled, let status = providers.statuses["github"] {
+                    LabeledContent("Status", value: status.label).foregroundStyle(status.isFailure ? .orange : .secondary)
+                }
+            }
             Section("Diagnostics") {
                 LabeledContent("Version", value: "0.1.0 · Developer preview")
                 LabeledContent("Event bridge", value: model.bridge.status)
@@ -141,6 +184,13 @@ struct SettingsView: View {
             Text(detail)
         }
     }
+    private func addRepository() {
+        guard let repository = GitHubSettings.repository(from: newRepository) else { return }
+        if !preferences.githubRepositories.contains(where: { $0.caseInsensitiveCompare(repository) == .orderedSame }) {
+            preferences.githubRepositories.append(repository)
+        }
+        newRepository = ""
+    }
     private func addQuickApp() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.application]; panel.allowsMultipleSelection = true
@@ -149,5 +199,20 @@ struct SettingsView: View {
         for url in panel.urls {
             if let id = Bundle(url: url)?.bundleIdentifier, !preferences.quickApps.contains(id) { preferences.quickApps.append(id) }
         }
+    }
+}
+
+enum GitHubSettings {
+    /// `owner/name` from what someone types or pastes: the pair itself, or a github.com URL.
+    static func repository(from text: String) -> String? {
+        var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        for prefix in ["https://github.com/", "http://github.com/", "github.com/"] where value.lowercased().hasPrefix(prefix) {
+            value = String(value.dropFirst(prefix.count))
+        }
+        if value.hasSuffix(".git") { value = String(value.dropLast(4)) }
+        let parts = value.split(separator: "/").prefix(2).map(String.init)
+        guard parts.count == 2 else { return nil }
+        let candidate = parts.joined(separator: "/")
+        return GitHubRuns.isRepository(candidate) ? candidate : nil
     }
 }

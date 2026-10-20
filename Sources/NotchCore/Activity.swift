@@ -167,6 +167,15 @@ public struct ActivityEvent: Codable, Equatable, Sendable {
         }
     }
 
+    /// Whether an update is news worth attention: a new task, a new state, a new request, or a new
+    /// title. Heartbeats, progress ticks, tool-by-tool agent updates, expiry refreshes and a request
+    /// being withdrawn change the row quietly.
+    public func isMaterialChange(from prior: ActivityEvent?) -> Bool {
+        guard let prior else { return true }
+        let newRequest = request != nil && prior.request?.id != request?.id
+        return prior.lifecycle != lifecycle || newRequest || prior.title != title
+    }
+
     /// The same event without anything that must not reach History on disk.
     public var historySafe: ActivityEvent {
         var copy = self

@@ -51,6 +51,9 @@ import AppKit
         case "filter": if let filter = AppModel.ActivityFilter(rawValue: argument) { model.setFilter(filter) }
         case "hide": if let record = model.record(argument) { model.hideFromStack(record) }
         case "pinRecord": if let record = model.record(argument) { model.togglePin(record) }
+        case "status":
+            let lines = model.providers.statuses.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.label)" }
+            try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)
         case "dumpHooks":
             let folder = AppFiles.root.appendingPathComponent("debug", isDirectory: true)
             for (name, text) in [("claude.json", HookSetup.claude(wait: 25)), ("codex.json", HookSetup.codex(wait: 25)), ("notify.toml", HookSetup.codexNotify)] {

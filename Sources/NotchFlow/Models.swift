@@ -59,6 +59,9 @@ struct QuickApp: Identifiable, Equatable {
     @Published var agentApprovals: Bool { didSet { save("agentApprovals", agentApprovals) } }
     /// Seconds a hook waits for an answer before the agent's own prompt takes over.
     @Published var approvalWait: Int { didSet { save("approvalWait", approvalWait) } }
+    /// `owner/name` repositories whose GitHub Actions runs appear in the stack.
+    @Published var githubRepositories: [String] { didSet { save("githubRepositories", githubRepositories) } }
+    @Published var githubEnabled: Bool { didSet { save("githubEnabled", githubEnabled) } }
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -83,6 +86,8 @@ struct QuickApp: Identifiable, Equatable {
         quickApps = defaults.stringArray(forKey: "quickApps") ?? []
         agentApprovals = defaults.bool(forKey: "agentApprovals")
         approvalWait = defaults.integer(forKey: "approvalWait")
+        githubRepositories = defaults.stringArray(forKey: "githubRepositories") ?? []
+        githubEnabled = defaults.bool(forKey: "githubEnabled")
     }
     private func save(_ key: String, _ value: Any) { defaults.set(value, forKey: key) }
 }

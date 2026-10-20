@@ -58,9 +58,26 @@ The hook adapter is covered by fixture tests. Actual Claude hooks on a Mac still
 
 Official reference: https://code.claude.com/docs/en/hooks (checked 2026-10-20).
 
+## GitHub Actions
+
+Off by default (Settings › GitHub Actions). NotchFlow polls `GET /repos/{owner}/{repo}/actions/runs?per_page=10` for the repositories you list. These are read-only REST calls with `If-None-Match`, so unchanged results come back as `304 Not Modified`. There are no webhooks, because a Mac app has no public endpoint, so runs are as fresh as the polling interval:
+
+| | Run in progress | Nothing running |
+|---|---|---|
+| With a token | every 15 s | every 60 s |
+| Without a token (public repositories) | every 60 s × number of repositories (GitHub allows 60 unauthenticated requests an hour) | every 180 s, or more |
+
+Intervals double in Low Power Mode. Failures back off exponentially, up to 15 minutes. `Retry-After` and an exhausted `x-ratelimit-remaining` pause polling until GitHub's reset time.
+
+Status mapping: `queued`/`requested`/`pending` → queued; `in_progress` → running (spinner, no percentage, because GitHub reports none); `waiting` (an environment awaiting a reviewer) and conclusion `action_required` → waiting; `success`/`neutral` → completed; `failure`/`timed_out`/`startup_failure` → failed; `cancelled`/`skipped`/`stale` → cancelled; anything undocumented → not shown. Runs that finished before NotchFlow started aren't announced. A live run lapses 15 minutes after the last successful poll. "Open" only follows `https://github.com/` links.
+
+The token is optional. It's needed for private repositories and the faster cadence. Use a fine-grained token limited to those repositories with read-only Actions access. It's stored in the login Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`), sent only to `api.github.com`, never logged, and never shown again after saving.
+
+Verified on the development Mac without a token: live `cli/cli` polling at the unauthenticated cadence, a private repository reporting "Private repositories need a token" without stopping the public one, and a conditional request answered with 304. The token path is covered by code review only. NotchFlow can't enter a token on your behalf.
+
 ## Other tools
 
-Wrap local commands with `run`, or publish your own lifecycle updates with `emit`. GitHub Actions, remote CI, MCP and other agent runtimes are not connected automatically. No GitHub tokens are requested or stored by this app.
+Wrap local commands with `run`, or publish your own lifecycle updates with `emit`. Remote CI other than GitHub Actions, MCP, and other agent runtimes aren't connected.
 
 ## Inbox behavior
 
