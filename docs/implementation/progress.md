@@ -36,15 +36,15 @@ Automated: 48 Swift tests (`swift test`) and 22 Python tests (`python3 -I Tests/
 
 ## Idle cost (30 minutes, at rest)
 
-Measured with `top -l 181 -s 10` on the Debug build while the Mac was in normal use (other apps active, and the
-notch sometimes hovered). **Interim: first 16 minutes; the 30-minute figures replace these when the run ends.**
+Measured with `top -l 181 -s 10` (30 minutes, 181 samples) on the Debug build, 2026-10-20 23:33–00:07,
+while the Mac was in normal use (other apps active, and the notch sometimes hovered or opened).
 
 | | Result |
 |---|---|
-| Samples at rest (90% of the run) | 0.07% CPU on average; 70 of 97 samples read 0.0% |
-| Idle wakeups at rest | ≈0.14 per second |
+| Samples at rest (91% of the run) | 0.12% CPU on average; 110 of 181 samples read 0.0% |
+| Idle wakeups at rest | ≈0.12 per second |
 | Spikes | Up to 14% for 10–30 s at a time, in clusters that match the notch being hovered or opened |
-| Memory | 26 MB physical footprint at start; ≈50 MB resident (`top`) |
+| Memory | Physical footprint 26 MB at start, 52 MB at the end. Growth after opening the workspace hasn't been investigated yet (view caches vs. a leak); it's tracked for the Obsidian & Silver validation phase. |
 
 With every opt-in off (the defaults), nothing polls at rest. Opt-ins add their own documented cadence:
 clipboard about 1 check/s, GitHub every 15–180 s, downloads only while a file is downloading, meetings
