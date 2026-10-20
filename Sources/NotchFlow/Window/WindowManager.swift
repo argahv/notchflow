@@ -172,9 +172,10 @@ import Carbon
     }
     /// Only explicit actions call this; passive notifications never take focus.
     func focus() { panel.makeKey(); panel.makeFirstResponder(host) }
-    func close() {
+    /// `restoringFocus: false` when the action that closes the workspace brings another app forward.
+    func close(restoringFocus: Bool = true) {
         model.send(.dismiss); panel.resignKey()
-        if let previousApp, previousApp.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+        if restoringFocus, let previousApp, previousApp.processIdentifier != ProcessInfo.processInfo.processIdentifier {
             previousApp.activate(options: [])
         }
         previousApp = nil

@@ -99,6 +99,23 @@ struct SettingsView: View {
                 Text("Camera, Calendar and Reminders are connected explicitly from Tools. No microphone or Accessibility access is required.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Agents") {
+                Toggle(isOn: $preferences.agentApprovals) {
+                    Text("Answer permission requests from the notch")
+                    Text("Hooks wait up to \(preferences.approvalWait) seconds for Allow or Deny. With no answer, the agent's own prompt in the terminal decides. Off: hooks only report status.")
+                }
+                .disabled(!preferences.bridgeEnabled)
+                Stepper(value: $preferences.approvalWait, in: AgentApprovals.waitRange, step: 5) {
+                    LabeledContent("Wait before handing back to the terminal", value: "\(preferences.approvalWait) s")
+                }
+                .disabled(!preferences.agentApprovals || !preferences.bridgeEnabled)
+                hookRow("Claude Code", detail: "Merge into ~/.claude/settings.json", text: HookSetup.claude(wait: preferences.approvalWait))
+                hookRow("Codex hooks", detail: "Merge into ~/.codex/hooks.json, then trust them with /hooks in Codex",
+                        text: HookSetup.codex(wait: preferences.approvalWait))
+                hookRow("Codex notify", detail: "Completion only, for config.toml. Use it or the hooks, not both", text: HookSetup.codexNotify)
+                Text("NotchFlow doesn't edit agent settings or type into terminals. Prompts, replies and tool input stay out of History; a pending request's command is shown only while it waits.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Diagnostics") {
                 LabeledContent("Version", value: "0.1.0 · Developer preview")
                 LabeledContent("Event bridge", value: model.bridge.status)
@@ -111,6 +128,18 @@ struct SettingsView: View {
             }
         }.formStyle(.grouped).frame(minWidth: 540, minHeight: 580)
             .onDisappear { model.synchronizeServices() }
+    }
+    @ViewBuilder private func hookRow(_ title: String, detail: String, text: String?) -> some View {
+        LabeledContent {
+            if let text {
+                Button("Copy") { HookSetup.copy(text) }.help(text)
+            } else {
+                Text("Unavailable in this build").foregroundStyle(.secondary)
+            }
+        } label: {
+            Text(title)
+            Text(detail)
+        }
     }
     private func addQuickApp() {
         let panel = NSOpenPanel()

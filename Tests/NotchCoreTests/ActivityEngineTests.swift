@@ -49,6 +49,13 @@ final class ActivityEngineTests: XCTestCase {
         XCTAssertEqual(queue.records.count, 1)
     }
 
+    func testMillisecondTimestampsDecodeAndRoundTrip() throws {
+        let json = #"{"version":2,"source":"codex","activityId":"t","phase":"progress","state":"running","title":"Codex","timestamp":"2026-10-20T10:00:00.250Z"}"#
+        let event = try ActivityEvent.decoder().decode(ActivityEvent.self, from: Data(json.utf8))
+        XCTAssertEqual(event.timestamp.timeIntervalSince1970.truncatingRemainder(dividingBy: 1), 0.25, accuracy: 0.0001)
+        XCTAssertEqual(try ActivityEvent.decoder().decode(ActivityEvent.self, from: ActivityEvent.encoder().encode(event)), event)
+    }
+
     func testFailuresStayInTheStackForAnHourAndCompletionsLeave() throws {
         var queue = ActivityQueue()
         try queue.ingest(agentEvent(.failed), now: now)

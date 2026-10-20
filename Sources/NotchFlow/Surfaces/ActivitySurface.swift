@@ -6,25 +6,55 @@ struct ActivitySurface: View {
     @ObservedObject var model: AppModel
     var body: some View {
         let detail: String? = { if case .activity(let detail) = model.route { return detail }; return nil }()
-        let rows = model.displayedActivities(detail: detail)
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: Metrics.gap) {
-                FilterBar(model: model).reveal(.secondary)
-                if rows.isEmpty {
+        let sections = model.activitySections(detail: detail)
+        VStack(alignment: .leading, spacing: 0) {
+            // The filter stays put while the stack scrolls beneath it.
+            FilterBar(model: model).reveal(.secondary)
+                .padding(.top, 10).padding(.horizontal, Metrics.pad).padding(.bottom, Metrics.gap)
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    rows(sections)
+                }
+                .scrollIndicators(.automatic)
+                // Past the size cap the stack scrolls; its last row fades out instead of being cut off.
+                .mask {
+                    VStack(spacing: 0) {
+                        Rectangle()
+                        LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom).frame(height: Metrics.pad)
+                    }
+                }
+                .onChange(of: detail) { _, id in
+                    guard let id else { return }
+                    withAnimation(Motion.quick) { proxy.scrollTo(id, anchor: .center) }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func rows(_ sections: [AppModel.ActivitySection]) -> some View {
+        let detail: String? = { if case .activity(let detail) = model.route { return detail }; return nil }()
+        VStack(alignment: .leading, spacing: Metrics.gap) {
+                if sections.allSatisfy(\.rows.isEmpty) {
                     emptyState.frame(height: Metrics.emptyRow).reveal(.primary)
                 }
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, record in
-                    ActivityCapsule(model: model, record: record, expanded: detail == record.id)
-                        .reveal(.primary, stagger: Double(min(index, 6)) * 0.03)
-                        .transition(.row)
+                ForEach(sections) { section in
+                    if let title = section.title {
+                        Text(title).font(TypeScale.meta).foregroundStyle(Ink.secondary).lineLimit(1)
+                            .padding(.leading, 4).frame(height: Metrics.sectionHeader)
+                            .accessibilityAddTraits(.isHeader)
+                            .transition(.opacity)
+                    }
+                    ForEach(Array(section.rows.enumerated()), id: \.element.id) { index, record in
+                        ActivityCapsule(model: model, record: record, expanded: detail == record.id)
+                            .reveal(.primary, stagger: Double(min(index, 6)) * 0.03)
+                            .transition(.row)
+                    }
                 }
                 TimerStrip(model: model, clock: model.clock)
                     .padding(.top, 4)
                     .reveal(.secondary, stagger: 0.04)
-            }
-            .padding(.top, 10).padding(.bottom, Metrics.pad).padding(.horizontal, Metrics.pad)
         }
-        .scrollIndicators(.automatic)
+        .padding(.bottom, Metrics.pad).padding(.horizontal, Metrics.pad)
     }
 
     @ViewBuilder private var emptyState: some View {
@@ -157,6 +187,9 @@ struct ActivityCapsule: View {
 
     private func detail(_ event: ActivityEvent) -> some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let request = record.actionableRequest() {
+                PermissionPrompt(model: model, record: record, request: request)
+            }
             if let progress = event.progress, !event.lifecycle.terminal {
                 ProgressLine(value: progress, tone: .blue)
             }
@@ -165,6 +198,11 @@ struct ActivityCapsule: View {
                     .lineLimit(4).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 8) {
+                if event.agent != nil, let host = model.host(for: record) {
+                    Button { model.openHost(record) } label: { Label("Open \(host.name)", systemImage: "macwindow") }
+                        .buttonStyle(PillButtonStyle(prominent: record.actionableRequest() == nil && event.lifecycle == .needsInput))
+                        .help("Brings \(host.name) forward; NotchFlow can't pick the tab or type for you")
+                }
                 if event.actionURL != nil {
                     Button { model.openAction(record) } label: { Label("Open", systemImage: "arrow.up.forward") }
                         .buttonStyle(PillButtonStyle(prominent: true, tone: event.lifecycle == .failed ? .coral : .iris))
@@ -187,6 +225,64 @@ struct ActivityCapsule: View {
             .frame(height: 26)
         }
         .padding(.horizontal, 12).padding(.bottom, 12)
+    }
+}
+
+/// A permission request a hook is waiting on. Allow takes two presses; Deny is one. If the time runs
+/// out, the hook stands down and the agent's own prompt in the terminal decides.
+private struct PermissionPrompt: View {
+    @ObservedObject var model: AppModel
+    let record: ActivityRecord
+    let request: ActivityRequest
+    @State private var confirming = false
+
+    var body: some View {
+        let lines = SurfaceLayout.requestLines(request.detail)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "hand.raised.fill").font(.system(size: 11, weight: .semibold)).foregroundStyle(Ink.amber)
+                Text("\(record.event.title) wants to use \(request.tool)").font(TypeScale.cardTitle).foregroundStyle(Ink.primary).lineLimit(1)
+                Spacer(minLength: 6)
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text("\(max(0, Int(request.expiresAt.timeIntervalSince(context.date).rounded(.up))))s")
+                        .font(TypeScale.numeral).foregroundStyle(Ink.secondary)
+                        .accessibilityLabel("Seconds left to answer")
+                }
+            }
+            .frame(height: 18)
+            if let detail = request.detail, lines > 0 {
+                Text(detail).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Ink.primary.opacity(0.92))
+                    .lineLimit(lines).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, minHeight: Double(lines) * Metrics.codeLine,
+                           maxHeight: Double(lines) * Metrics.codeLine, alignment: .topLeading)
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Ink.void.opacity(0.7)))
+            }
+            HStack(spacing: 8) {
+                Button {
+                    if confirming { model.answer(record, .allow) } else { confirming = true }
+                } label: { Text(confirming ? "Confirm allow" : "Allow once").contentTransition(.opacity) }
+                    .buttonStyle(PillButtonStyle(prominent: true, tone: confirming ? .mint : .iris))
+                    .help(confirming ? "Allows this one request" : "Press again to confirm")
+                Button("Deny") { model.answer(record, .deny) }.buttonStyle(PillButtonStyle())
+                Spacer(minLength: 0)
+            }
+            .frame(height: 26)
+        }
+        .padding(10)
+        .background {
+            let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
+            shape.fill(Ink.amber.opacity(0.07)).overlay(shape.strokeBorder(Ink.amber.opacity(0.22), lineWidth: 0.75))
+        }
+        .animation(Motion.micro, value: confirming)
+        // An armed Allow disarms itself after a few seconds.
+        .task(id: confirming) {
+            guard confirming else { return }
+            try? await Task.sleep(for: .seconds(4))
+            confirming = false
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Permission request from \(record.event.title) for \(request.tool)")
     }
 }
 

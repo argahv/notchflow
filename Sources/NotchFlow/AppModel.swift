@@ -90,6 +90,7 @@ struct CommandItem: Identifiable {
     private var openedByDrag = false
     private var subscriptions = Set<AnyCancellable>()
     private let queueURL = AppFiles.root.appendingPathComponent("activities.json")
+    let approvals = AgentApprovals()
 
     init(preferences: Preferences) {
         self.preferences = preferences
@@ -108,6 +109,10 @@ struct CommandItem: Identifiable {
         preferences.$bridgeEnabled.dropFirst().sink { [weak self] enabled in
             self?.providers.setEnabled("inbox", enabled)
         }.store(in: &subscriptions)
+        approvals.sync(enabled: preferences.agentApprovals, wait: preferences.approvalWait)
+        preferences.$agentApprovals.combineLatest(preferences.$approvalWait).dropFirst()
+            .sink { [weak self] enabled, wait in self?.approvals.sync(enabled: enabled, wait: wait) }
+            .store(in: &subscriptions)
         preferences.$privacy.dropFirst().sink { [weak self] privateMode in
             DispatchQueue.main.async { if privateMode { self?.send(.endEditing) }; self?.reflow() }
         }.store(in: &subscriptions)
@@ -160,6 +165,22 @@ struct CommandItem: Identifiable {
         return rows
     }
     func record(_ id: String) -> ActivityRecord? { queue.records.first(where: { $0.id == id }) }
+
+    struct ActivitySection: Identifiable { let id: String; let title: String?; let rows: [ActivityRecord] }
+    /// Agents group by project once more than one project has sessions; projects keep the order of
+    /// their most urgent session. Everything else is one untitled section.
+    func activitySections(detail: String?) -> [ActivitySection] {
+        let rows = displayedActivities(detail: detail)
+        guard activityFilter == .agents else { return [ActivitySection(id: "all", title: nil, rows: rows)] }
+        var order: [String] = [], groups: [String: [ActivityRecord]] = [:]
+        for row in rows {
+            let project = row.event.project ?? "Other"
+            if groups[project] == nil { order.append(project) }
+            groups[project, default: []].append(row)
+        }
+        guard order.count > 1 else { return [ActivitySection(id: "all", title: nil, rows: rows)] }
+        return order.map { ActivitySection(id: "project-" + $0, title: $0, rows: groups[$0] ?? []) }
+    }
 
     enum ActivityFilter: String, CaseIterable, Identifiable {
         case all, agents, pipelines, downloads, done
@@ -359,15 +380,30 @@ struct CommandItem: Identifiable {
         do {
             try queue.ingest(event)
             persistQueue()
-            if interaction.presentation == .expanded, visibleActivities.contains(where: { $0.id == event.key }),
-               !workspaceActivityIDs.contains(event.key) { workspaceActivityIDs.append(event.key) }
             let updated = record(event.key)?.event
+            let order = interaction.presentation == .expanded ? stackPlacement(for: event.key, prior: prior) : nil
             if updated == event && prior != event { deliver(event) }
             if let record = record(event.key), [.completed, .cancelled].contains(record.event.lifecycle),
                workspaceActivityIDs.contains(record.id), !record.isPinned { scheduleRetraction(record.id) }
             scheduleExpiryRefresh()
-            reflow()
+            if let order { commit(snapshot, animation: Motion.quick, also: { self.workspaceActivityIDs = order }) } else { reflow() }
         } catch { message = error.localizedDescription }
+    }
+
+    /// Where a changed record goes in the open stack, or nil to leave the order alone. Rows keep their
+    /// place while the stack is open, except work that newly needs the person: it moves to the top so
+    /// an answer is never waiting below the fold. The row being read stays put.
+    private func stackPlacement(for id: String, prior: ActivityEvent?) -> [String]? {
+        guard let record = record(id), visibleActivities.contains(where: { $0.id == id }) else { return nil }
+        let urgent = [.needsInput, .failed].contains(record.event.lifecycle)
+            && (prior?.lifecycle != record.event.lifecycle || record.event.request != prior?.request)
+        var order = workspaceActivityIDs
+        if case .activity(id) = route { return order.contains(id) ? nil : order + [id] }
+        if urgent {
+            order.removeAll { $0 == id }
+            return [id] + order
+        }
+        return order.contains(id) ? nil : order + [id]
     }
 
     private func deliver(_ event: ActivityEvent) {
@@ -460,6 +496,29 @@ struct CommandItem: Identifiable {
         retractions[id] = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: work)
     }
+    // MARK: Agents
+
+    /// Sends Allow or Deny to the waiting hook. The request is withdrawn at once so it can't be
+    /// answered twice; the hook reports the agent's next state.
+    func answer(_ record: ActivityRecord, _ decision: AgentApprovals.Decision) {
+        guard let request = record.actionableRequest() else {
+            message = "That request is no longer waiting. Answer it in the terminal."; return
+        }
+        do {
+            try approvals.respond(decision, to: request)
+            queue.clearRequest(record.id)
+            reflow()
+        } catch { message = error.localizedDescription }
+    }
+
+    func host(for record: ActivityRecord) -> HostApp? { HostApp.resolve(record.event.agent?.terminal) }
+
+    func openHost(_ record: ActivityRecord) {
+        guard let app = host(for: record) else { return }
+        windows?.close(restoringFocus: false)
+        app.activate()
+    }
+
     func togglePin(_ record: ActivityRecord) {
         queue.setPinned(record.id, !record.isPinned); persistQueue(); reflow()
     }
@@ -514,7 +573,8 @@ struct CommandItem: Identifiable {
         let boundaries = queue.records.compactMap { record -> Date? in
             guard !record.event.phase.terminal else { return nil }
             let expiry = record.event.expiresAt ?? record.event.timestamp.addingTimeInterval(3600)
-            return [expiry, record.snoozedUntil].compactMap { $0 }.filter { $0 > now }.min()
+            // A pending request's buttons disappear when it lapses, even if its hook never reports back.
+            return [expiry, record.snoozedUntil, record.event.request?.expiresAt].compactMap { $0 }.filter { $0 > now }.min()
         }
         guard let next = boundaries.min() else { return }
         let work = DispatchWorkItem { [weak self] in
@@ -670,7 +730,10 @@ struct CommandItem: Identifiable {
         } else { backdrop.stop() }
     }
 
-    func stop() { clock.run(false); providers.stopAll(); media.stop(); camera.stop(); backdrop.stop(); battery.stop() }
+    func stop() {
+        clock.run(false); providers.stopAll(); approvals.withdraw()
+        media.stop(); camera.stop(); backdrop.stop(); battery.stop()
+    }
 }
 
 extension Notification.Name {

@@ -28,7 +28,11 @@ The history retains 200 latest activity records. This is latest-state-per-task h
 
 Actions permit only HTTP(S), file and VS Code URLs. Explicit clicks are required. There is no remote shell command field. Do not publish secrets in titles, summaries or URLs. The privacy switch conceals UI but does not encrypt on-disk history.
 
-## Claude Code
+## Claude Code and Codex
+
+**Current adapter:** `notchflow.py agent-hook --provider claude|codex`, with tool state, project and branch, and optional answers to permission requests. Copy its configuration from Settings › Agents. See [architecture/agent-integrations.md](architecture/agent-integrations.md). The `claude-hook` setup below still works for existing installs.
+
+### Legacy `claude-hook`
 
 This is a command-hook adapter, not a plugin that controls Claude. Copy the actual absolute path of `Scripts/notchflow.py` into the command below. Merge these entries into your existing Claude Code settings; do not overwrite unrelated hooks.
 

@@ -51,6 +51,12 @@ import AppKit
         case "filter": if let filter = AppModel.ActivityFilter(rawValue: argument) { model.setFilter(filter) }
         case "hide": if let record = model.record(argument) { model.hideFromStack(record) }
         case "pinRecord": if let record = model.record(argument) { model.togglePin(record) }
+        case "dumpHooks":
+            let folder = AppFiles.root.appendingPathComponent("debug", isDirectory: true)
+            for (name, text) in [("claude.json", HookSetup.claude(wait: 25)), ("codex.json", HookSetup.codex(wait: 25)), ("notify.toml", HookSetup.codexNotify)] {
+                try? text?.write(to: folder.appendingPathComponent("hooks-" + name), atomically: true, encoding: .utf8)
+            }
+        case "allow", "deny": if let record = model.record(argument) { model.answer(record, verb == "allow" ? .allow : .deny) }
         default: NSLog("NotchFlow debug: unknown command %@", command)
         }
     }

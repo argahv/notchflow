@@ -10,6 +10,8 @@ enum Metrics {
     static let workspaceWidth = 500.0
     static let glanceHeight = 64.0
     static let stackLayer = 5.0
+    static let codeLine = 15.0
+    static let sectionHeader = 16.0
     static let filterBar = 26.0
     static let pad = 14.0
     static let gap = 8.0
@@ -83,9 +85,11 @@ enum Metrics {
         let pad = Metrics.pad
         switch snapshot.route {
         case .activity(let detail):
-            let rows = model.displayedActivities(detail: detail)
+            let sections = model.activitySections(detail: detail)
+            let rows = sections.flatMap(\.rows)
             var height = 10.0 + Metrics.filterBar + Metrics.gap
             height += rows.isEmpty ? Metrics.emptyRow : stack(rows.count, Metrics.activityRow)
+            height += Double(sections.filter { $0.title != nil }.count) * (Metrics.sectionHeader + Metrics.gap)
             if let detail, let record = rows.first(where: { $0.id == detail }) { height += detailHeight(record) }
             return height + 12 + Metrics.timerStrip + pad
         case .music:
@@ -155,7 +159,18 @@ enum Metrics {
     static func detailHeight(_ record: ActivityRecord) -> Double {
         let summary = record.event.summary ?? ""
         let lines = summary.isEmpty ? 0 : min(4, Int((Double(summary.count) / 62).rounded(.up)))
-        return Double(lines) * 16 + 10 + 26 + 12
+        let request = record.actionableRequest().map { requestHeight($0) + 10 } ?? 0
+        return request + Double(lines) * 16 + 10 + 26 + 12
+    }
+
+    /// The permission prompt: header, the command or path being authorized, and the answers.
+    static func requestHeight(_ request: ActivityRequest) -> Double {
+        let lines = requestLines(request.detail)
+        return 10 + 18 + 8 + (lines > 0 ? Double(lines) * Metrics.codeLine + 16 + 8 : 0) + 26 + 10
+    }
+    static func requestLines(_ detail: String?) -> Int {
+        guard let detail, !detail.isEmpty else { return 0 }
+        return min(3, Int((Double(detail.count) / 56).rounded(.up)))
     }
 
     /// The note editor grows two lines at a time, between a compact and a focused height; beyond

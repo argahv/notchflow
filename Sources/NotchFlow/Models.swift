@@ -55,12 +55,16 @@ struct QuickApp: Identifiable, Equatable {
     /// Finished history older than this is pruned; 0 keeps everything (still capped at 200 records).
     @Published var historyRetentionDays: Int { didSet { save("historyRetentionDays", historyRetentionDays) } }
     @Published var quickApps: [String] { didSet { save("quickApps", quickApps) } }
+    /// Off by default: agent hooks wait briefly for an Allow or Deny from the notch.
+    @Published var agentApprovals: Bool { didSet { save("agentApprovals", agentApprovals) } }
+    /// Seconds a hook waits for an answer before the agent's own prompt takes over.
+    @Published var approvalWait: Int { didSet { save("approvalWait", approvalWait) } }
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         defaults.register(defaults: ["overlayEnabled": true, "simulatedNotch": true,
                                     "bridgeEnabled": true, "notchWidth": 190.0, "hoverDelay": 0.12,
-                                    "showBattery": true, "historyRetentionDays": 30,
+                                    "showBattery": true, "historyRetentionDays": 30, "approvalWait": 25,
                                     "quickApps": ["com.apple.Terminal", "com.microsoft.VSCode", "com.apple.finder", "com.apple.Safari", "com.apple.Notes"]])
         overlayEnabled = defaults.bool(forKey: "overlayEnabled")
         simulatedNotch = defaults.bool(forKey: "simulatedNotch")
@@ -77,6 +81,8 @@ struct QuickApp: Identifiable, Equatable {
         showBattery = defaults.bool(forKey: "showBattery")
         historyRetentionDays = defaults.integer(forKey: "historyRetentionDays")
         quickApps = defaults.stringArray(forKey: "quickApps") ?? []
+        agentApprovals = defaults.bool(forKey: "agentApprovals")
+        approvalWait = defaults.integer(forKey: "approvalWait")
     }
     private func save(_ key: String, _ value: Any) { defaults.set(value, forKey: key) }
 }

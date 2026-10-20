@@ -186,11 +186,24 @@ public struct ActivityEvent: Codable, Equatable, Sendable {
         return parts.count == 2 && parts.allSatisfy { isToken(String($0), max: 100) }
     }
 
+    /// ISO 8601 with or without fractional seconds: hook bursts carry milliseconds so events from the
+    /// same second still apply in order; v1 publishers and older History use whole seconds.
     public static func decoder() -> JSONDecoder {
-        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601; return decoder
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let text = try decoder.singleValueContainer().decode(String.self)
+            if let date = try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(text) { return date }
+            if let date = try? Date.ISO8601FormatStyle().parse(text) { return date }
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Expected an ISO 8601 date"))
+        }
+        return decoder
     }
     public static func encoder() -> JSONEncoder {
-        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(date.formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true)))
+        }
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; return encoder
     }
 }
