@@ -1,0 +1,52 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Xcode
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.app
+*.xcarchive
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Metal (CI compiles the shader separately)
+*.air
+*.metallib
+
+# Distribution artifacts
+*.zip
+*.dmg
+
+# Python (bridge CLI and tests)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Local secrets and logs
+.env
+.env.*
+*.log

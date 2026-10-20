@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+ <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+ <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+ <key>CFBundleName</key><string>NotchFlow</string>
+ <key>CFBundleDisplayName</key><string>NotchFlow</string>
+ <key>CFBundlePackageType</key><string>APPL</string>
+ <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
+ <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
+ <key>LSMinimumSystemVersion</key><string>14.6</string>
+ <key>LSUIElement</key><true/>
+ <key>NSHighResolutionCapable</key><true/>
+ <key>NSCameraUsageDescription</key><string>Show a camera mirror only when you enable Mirror in the workspace.</string>
+ <key>NSCalendarsFullAccessUsageDescription</key><string>Show your upcoming events when you connect Calendar.</string>
+ <key>NSRemindersFullAccessUsageDescription</key><string>Show and complete reminders when you connect Reminders.</string>
+ <key>NSAppleEventsUsageDescription</key><string>Read track details and control your selected Music or Spotify player.</string>
+ <key>NSScreenCaptureUsageDescription</key><string>Refract the screen region behind the expanded notch in optional Ultra mode. Frames are not saved.</string>
+</dict></plist>
