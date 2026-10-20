@@ -60,6 +60,22 @@ import AppKit
             } else {
                 model.clipboard.consider(argument.replacingOccurrences(of: "\\n", with: "\n"), types: [], app: "com.apple.dt.Xcode", appName: "Xcode")
             }
+        case "nowplaying":
+            // "nowplaying:<title>|<artist>" or "nowplaying:off"
+            let parts = argument.split(separator: "|", maxSplits: 1).map(String.init)
+            model.media.debugNowPlaying(title: argument == "off" ? nil : parts.first, artist: parts.count > 1 ? parts[1] : "")
+            model.reflow()
+        case "hoverOpen":
+            // Same handlers the preview's buttons call: "primary" (single or the split's work side),
+            // "ambient" (the split's left side), "count" (the +N chip).
+            switch (argument, model.glanceLead) {
+            case ("primary", .single(let item, _)), ("primary", .split(_, let item, _)), ("ambient", .split(let item, _, _)):
+                model.openHoverItem(item)
+            case ("count", _): model.navigate(.activity(detail: nil))
+            default: break
+            }
+        case "clearActivities":
+            model.clearHistory(); model.reflow()
         case "snapshot":
             // "snapshot:<name>" or "snapshot:<name>:light"
             let parts = argument.split(separator: ":").map(String.init)
@@ -68,7 +84,9 @@ import AppKit
             }
         case "status":
             let lines = model.providers.statuses.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.label)" }
-                + ["context: \(model.contextBoost.map(\.rawValue).sorted().joined(separator: ","))",
+                + ["route: \(model.route) · \(model.interaction.presentation)",
+                   "hover: \(model.hoverChoice.primary?.id ?? "-") + \(model.hoverChoice.secondary?.id ?? "-") +\(model.hoverChoice.others)",
+                   "context: \(model.contextBoost.map(\.rawValue).sorted().joined(separator: ","))",
                    "mode: \(model.preferences.mode?.title ?? "Custom")"]
             try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)
         case "dumpHooks":

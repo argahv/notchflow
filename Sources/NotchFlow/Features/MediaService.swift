@@ -145,6 +145,14 @@ import Combine
         return result
     }
 
+    #if DEBUG
+    /// Scripted QA only: stands in for a playing track so layouts can be checked without a player.
+    func debugNowPlaying(title: String?, artist: String) {
+        if let title { self.title = title; self.artist = artist; playing = true; running = true }
+        else { reset(); running = isRunning }
+    }
+    #endif
+
     private func reset() { title = ""; artist = ""; playing = false; elapsed = 0; duration = 0; artwork = nil; trackID = nil; artworkTrack = nil }
     func stop() { stopPolling(); stopObserving() }
 }

@@ -5,6 +5,11 @@ import SwiftUI
 enum Metrics {
     static let statusWing = 58.0
     static let glanceWing = 118.0
+    /// Quick access: three shortcuts under the notch.
+    static let quickWing = 40.0
+    static let quickHeight = 54.0
+    /// Split island: two regions of about 230 pt each.
+    static let splitWing = 150.0
     /// Each side of the band holds four 26 pt dock controls plus the ear: 142 pt, with slack.
     static let dockWing = 146.0
     static let workspaceWidth = 500.0
@@ -74,10 +79,21 @@ enum Metrics {
                            wing: wing, ear: status || aware ? 6 : 3, corner: status || aware ? hardware + 3 : hardware,
                            inset: status || aware ? 0 : 1)
         case .preview:
-            let depth = Double(model.glanceStackDepth)
-            return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing,
-                                    height: Metrics.glanceHeight + (depth > 0 ? Metrics.stackLayer * depth + 4 : 0)),
-                           wing: Metrics.glanceWing, ear: 10, corner: 22)
+            // Each preview layout has its own compact size; widths are fixed per layout (never measured
+            // from text), so there is no layout feedback loop and no horizontal jitter.
+            switch model.glanceLead {
+            case .quickAccess:
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.quickWing, height: Metrics.quickHeight),
+                               wing: Metrics.quickWing, ear: 8, corner: 18)
+            case .split:
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.glanceHeight),
+                               wing: Metrics.splitWing, ear: 10, corner: 22)
+            default:
+                let depth = Double(model.glanceStackDepth)
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing,
+                                        height: Metrics.glanceHeight + (depth > 0 ? Metrics.stackLayer * depth + 4 : 0)),
+                               wing: Metrics.glanceWing, ear: 10, corner: 22)
+            }
         case .expanded:
             let width = workspaceWidth(display)
             return resolve(.content(width: width, height: workspaceHeight(snapshot, model), minHeight: 56, maxHeight: 420),
@@ -187,6 +203,11 @@ enum Metrics {
             agent = (agentTwoColumns(model) ? max(column(steps), column(facts)) : column(steps) + 10 + column(facts)) + 10
         }
         return request + agent + Double(lines) * 16 + 10 + 26 + 12
+    }
+
+    /// Split mode needs both regions at full size; narrower displays get the single preview.
+    static func splitFits(_ display: DisplayGeometry) -> Bool {
+        display.notchWidth + 2 * Metrics.splitWing <= display.width - 2 * SurfaceGeometryEngine.screenMargin
     }
 
     /// Two columns once the workspace leaves room for both (about 200 pt each).

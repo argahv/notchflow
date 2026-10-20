@@ -121,7 +121,13 @@ struct NotchBand: View {
     }
 
     @ViewBuilder private var trailingStatus: some View {
-        let glanceShowsTimer = model.interaction.presentation == .preview && model.glanceLead == .timer
+        let glanceShowsTimer: Bool = {
+            guard model.interaction.presentation == .preview else { return false }
+            switch model.glanceLead {
+            case .single(.timer, _), .split(.timer, _, _), .split(_, .timer, _): return true
+            default: return false
+            }
+        }()
         if let status = model.trailingStatus, !glanceShowsTimer {
             switch status {
             case .timer:
@@ -229,8 +235,9 @@ struct DropApproach: View {
 
 // MARK: - Glance
 
-/// One or two rows about the single most relevant thing: a notification, a waiting task, what's
-/// playing, the timer. Clicking it opens the matching place in the workspace.
+/// The hover preview: whatever matters most right now (input needed, a failure, a running agent or
+/// build, a focus session, music), two of them side by side in one surface when an ambient item sits
+/// beside real work, or shortcuts when nothing is live. Every part opens its own destination.
 struct GlanceView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var media: MediaService
@@ -239,16 +246,56 @@ struct GlanceView: View {
 
     var body: some View {
         let lead = model.glanceLead
+        Group {
+            switch lead {
+            case .privacy:
+                HStack(spacing: 12) {
+                    ToneGlyph(symbol: "eye.slash", tone: .neutral, size: 30).reveal(.primary)
+                    GlanceText(title: "Details hidden", detail: "Activities continue quietly")
+                    Spacer(minLength: 8)
+                }
+            case .notification(let record):
+                notification(record)
+            case .quickAccess:
+                QuickAccessRow(model: model)
+            case .single(let item, let others):
+                single(item, others: others)
+            case .split(let ambient, let work, let others):
+                HStack(spacing: 0) {
+                    SplitRegion(model: model, media: media, clock: clock, item: ambient, others: 0)
+                    Rectangle().fill(Ink.titanium.opacity(0.5)).frame(width: 0.5, height: 30)
+                        .reveal(.secondary)
+                    SplitRegion(model: model, media: media, clock: clock, item: work, others: others)
+                }
+            }
+        }
+        .padding(.horizontal, model.form.ear + 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .id(identity(lead))
+        .transition(.hoverSwap)
+    }
+
+    private func single(_ item: AppModel.HoverItem, others: Int) -> some View {
         let depth = model.glanceStackDepth
-        VStack(spacing: 0) {
-            HStack(spacing: 12) { content(lead) }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        return VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Button { model.openHoverItem(item) } label: {
+                    HoverItemLabel(model: model, media: media, clock: clock, item: item, compact: false)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScale())
+                .help("\(HoverText.destination(item)) · ⌃⌥Space opens the workspace")
+                .accessibilityHint("Opens \(HoverText.destination(item))")
+                HoverItemTrailing(model: model, media: media, item: item, compact: false)
+                if others > 0 { CountChip(model: model, others: others) }
+            }
+            .frame(maxHeight: .infinity)
             if depth > 0 {
                 // The next tasks peek out beneath the lead like stacked cards; opening the stack
                 // separates each layer into its own row.
                 VStack(spacing: 2) {
-                    ForEach(Array(model.rankedActivities.dropFirst().prefix(depth).enumerated()), id: \.element.id) { index, record in
-                        // Each layer carries a trace of its task's tone so a failure underneath still reads.
+                    ForEach(Array(model.rankedActivities.filter { "\($0.id)" != item.id }.prefix(depth).enumerated()), id: \.element.id) { index, record in
                         RoundedRectangle(cornerRadius: 2, style: .continuous)
                             .fill(Ink.hover.opacity(index == 0 ? 0.95 : 0.6))
                             .overlay(RoundedRectangle(cornerRadius: 2, style: .continuous)
@@ -261,31 +308,18 @@ struct GlanceView: View {
                 .frame(height: Metrics.stackLayer * Double(depth) + 4, alignment: .top)
             }
         }
-            .padding(.horizontal, model.form.ear + 12)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
-            .onTapGesture { open(lead) }
-            .id(identity(lead))
-            .transition(.swap)
-            .help("Open workspace · ⌃⌥Space")
     }
 
-    @ViewBuilder private func content(_ lead: AppModel.GlanceLead) -> some View {
-        switch lead {
-        case .privacy:
-            ToneGlyph(symbol: "eye.slash", tone: .neutral, size: 30).reveal(.primary)
-            text("Details hidden", "Activities continue quietly")
-            Spacer(minLength: 8)
-        case .notification(let record):
+    private func notification(_ record: ActivityRecord) -> some View {
+        HStack(spacing: 12) {
             // Severity reads first: the glyph, then the message, then its source, then the actions.
             ToneGlyph(symbol: record.event.lifecycle.symbol, tone: record.event.lifecycle.tone, size: 30)
                 .nookMatched("lead-\(record.id)", in: namespace).reveal(.primary)
-            text(record.event.title, ActivityText.subtitle(record), titleStagger: 0.03)
+            GlanceText(title: record.event.title, detail: ActivityText.subtitle(record), stagger: 0.03)
             Spacer(minLength: 8)
             // The notification's own next step: Review a request (answered in the detail, never from
             // here), Join a call, Show a download, Open a failed run; otherwise View.
             let primary = model.notificationAction(record)
-            // The glyph carries the state's colour; the action itself is always the blue primary.
             Button(primary.title) { primary.perform() }
                 .buttonStyle(PillButtonStyle(prominent: true))
                 .help(primary.title == "View" ? "Show details" : primary.title)
@@ -293,55 +327,6 @@ struct GlanceView: View {
             Button { model.dismissNotification() } label: { Image(systemName: "xmark") }
                 .buttonStyle(IconButtonStyle(size: 24, tint: Ink.secondary)).accessibilityLabel("Dismiss")
                 .reveal(.detail, stagger: 0.03)
-        case .activity(let record):
-            ToneGlyph(symbol: SourceGlyph.symbol(for: record.event), tone: record.event.lifecycle.tone, size: 30)
-                .nookMatched("lead-\(record.id)", in: namespace).reveal(.primary)
-            text(record.event.title, ActivityText.subtitle(record), titleStagger: 0.03)
-            Spacer(minLength: 8)
-            if model.stackCount > 1 {
-                Button { model.navigate(.activity(detail: nil)); model.windows?.focus() } label: {
-                    Text("+\(model.stackCount - 1)").font(TypeScale.badge).monospacedDigit().foregroundStyle(Ink.primary)
-                        .padding(.horizontal, 8).frame(height: 20)
-                        .background(Capsule().fill(Ink.elevated))
-                }
-                .buttonStyle(.plain)
-                .help("Show all \(model.stackCount) activities")
-                .accessibilityLabel("Show all \(model.stackCount) activities")
-                .reveal(.detail)
-            } else {
-                Image(systemName: "chevron.down").font(.caption.weight(.semibold)).foregroundStyle(Ink.muted).reveal(.detail)
-            }
-        case .music:
-            ArtworkView(image: media.artwork, size: 36).nookMatched("music-art", in: namespace).reveal(.primary)
-            text(media.hasTrack ? media.title : "Music", media.artist.isEmpty ? (media.playing ? "Playing" : "Paused") : media.artist, titleStagger: 0.03)
-            Spacer(minLength: 8)
-            Button { media.command(.toggle) } label: {
-                Image(systemName: media.playing ? "pause.fill" : "play.fill").contentTransition(.symbolEffect(.replace))
-            }
-            .buttonStyle(IconButtonStyle(size: 30)).accessibilityLabel(media.playing ? "Pause" : "Play").reveal(.detail)
-        case .timer:
-            ToneGlyph(symbol: "timer", tone: .silver, size: 30).nookMatched("timer-glyph", in: namespace).reveal(.primary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(model.timerLabel(at: clock.now)).font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit())
-                    .contentTransition(.numericText(countsDown: true)).animation(Motion.micro, value: clock.now)
-                Text(model.countdown.running ? "Focus timer" : "Focus timer · Paused").font(TypeScale.secondary).foregroundStyle(Ink.secondary)
-            }
-            .reveal(.primary, stagger: 0.03)
-            Spacer(minLength: 8)
-            Button { model.toggleTimer() } label: { Image(systemName: model.countdown.running ? "pause.fill" : "play.fill") }
-                .buttonStyle(IconButtonStyle(size: 30)).accessibilityLabel(model.countdown.running ? "Pause timer" : "Resume timer").reveal(.detail)
-        case .idle:
-            ToneGlyph(symbol: "waveform.path", tone: .silver, size: 30).reveal(.primary)
-            text("Workspace", "Click to open · ⌃⌥Space", titleStagger: 0.03)
-            Spacer(minLength: 8)
-            Image(systemName: "chevron.down").font(.caption.weight(.semibold)).foregroundStyle(Ink.muted).reveal(.detail)
-        }
-    }
-
-    private func text(_ title: String, _ detail: String, titleStagger: Double = 0) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(TypeScale.cardTitle).foregroundStyle(Ink.primary).lineLimit(1).reveal(.primary, stagger: titleStagger)
-            Text(detail).font(TypeScale.secondary).foregroundStyle(Ink.secondary).lineLimit(1).reveal(.secondary)
         }
     }
 
@@ -349,22 +334,280 @@ struct GlanceView: View {
         switch lead {
         case .privacy: "privacy"
         case .notification(let record): "n-\(record.id)"
-        case .activity(let record): "a-\(record.id)"
+        case .quickAccess: "quick"
+        case .single(let item, _): "s-\(item.id)"
+        case .split(let ambient, let work, _): "split-\(ambient.id)-\(work.id)"
+        }
+    }
+}
+
+extension AppModel.HoverItem {
+    var id: String {
+        switch self {
+        case .activity(let record): record.id
         case .music: "music"
         case .timer: "timer"
-        case .idle: "idle"
+        }
+    }
+}
+
+extension AnyTransition {
+    /// Preview A → B: the outgoing item lifts away, the next settles in from just below, inside the
+    /// surface's mask. The surface itself only resizes if the new layout needs it.
+    static var hoverSwap: AnyTransition {
+        if Motion.reduced { return .opacity.animation(.easeOut(duration: 0.14)) }
+        return .asymmetric(insertion: .opacity.combined(with: .offset(y: 6)).combined(with: .scale(scale: 0.98, anchor: .top))
+                                .animation(.spring(response: 0.26, dampingFraction: 0.9).delay(0.04)),
+                           removal: .opacity.combined(with: .offset(y: -5)).animation(.easeOut(duration: 0.12)))
+    }
+}
+
+/// Glyph and two lines for one hover item, from real state only.
+private struct HoverItemLabel: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var media: MediaService
+    @ObservedObject var clock: Clock
+    let item: AppModel.HoverItem
+    let compact: Bool
+    @Environment(\.nookNamespace) private var namespace
+
+    var body: some View {
+        let size: CGFloat = compact ? 26 : 30
+        HStack(spacing: compact ? 9 : 12) {
+            switch item {
+            case .activity(let record):
+                ToneGlyph(symbol: SourceGlyph.symbol(for: record.event), tone: record.event.lifecycle.tone, size: size)
+                    .nookMatched("lead-\(record.id)", in: namespace).reveal(.primary)
+                GlanceText(title: HoverText.title(record), detail: HoverText.subtitle(record),
+                           since: HoverText.showsElapsed(record) ? (record.firstSeen ?? record.event.timestamp) : nil,
+                           compact: compact, stagger: 0.03)
+            case .music:
+                ArtworkView(image: media.artwork, size: compact ? 30 : 36)
+                    .nookMatched("music-art", in: namespace).reveal(.primary)
+                GlanceText(title: media.title, detail: [media.artist.isEmpty ? nil : media.artist, "Playing"].compactMap { $0 }.joined(separator: " · "),
+                           compact: compact, stagger: 0.03)
+            case .timer:
+                ToneGlyph(symbol: "timer", tone: .silver, size: size).nookMatched("timer-glyph", in: namespace).reveal(.primary)
+                GlanceText(title: model.countdown.running ? "Focus session" : "Focus session · Paused",
+                           detail: "\(model.timerLabel(at: clock.now)) remaining", compact: compact, stagger: 0.03, numeric: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The status mark and the one inline control an item offers. Controls never expand the surface
+/// and briefly hold the preview still so it can't change under the pointer.
+private struct HoverItemTrailing: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var media: MediaService
+    let item: AppModel.HoverItem
+    let compact: Bool
+    var body: some View {
+        let control: CGFloat = compact ? 26 : 30
+        Group {
+            switch item {
+            case .activity(let record):
+                let event = record.event
+                switch event.lifecycle {
+                case .needsInput, .waiting:
+                    Circle().fill(Ink.amber).frame(width: 7, height: 7).accessibilityLabel("Needs you")
+                case .failed:
+                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Ink.red).accessibilityLabel("Failed")
+                case .running, .starting, .queued:
+                    if event.kind == .meeting, let _ = event.actionURL {
+                        Button("Join") { model.lockHover(); model.openAction(record) }.buttonStyle(PillButtonStyle(prominent: true))
+                    } else if let progress = event.progress {
+                        Text("\(Int(progress * 100))%").font(TypeScale.numeral).foregroundStyle(Ink.primary)
+                    } else {
+                        ProgressView().controlSize(.mini).tint(Ink.silver).accessibilityLabel("In progress")
+                    }
+                default:
+                    EmptyView()
+                }
+            case .music:
+                Button { model.lockHover(); media.command(.toggle) } label: {
+                    Image(systemName: media.playing ? "pause.fill" : "play.fill").contentTransition(.symbolEffect(.replace))
+                }
+                .buttonStyle(IconButtonStyle(size: control)).accessibilityLabel(media.playing ? "Pause" : "Play")
+            case .timer:
+                Button { model.lockHover(); model.toggleTimer() } label: {
+                    Image(systemName: model.countdown.running ? "pause.fill" : "play.fill").contentTransition(.symbolEffect(.replace))
+                }
+                .buttonStyle(IconButtonStyle(size: control)).accessibilityLabel(model.countdown.running ? "Pause timer" : "Resume timer")
+            }
+        }
+        .reveal(.detail)
+    }
+}
+
+/// "+2": the other activities. Opens the full stack.
+private struct CountChip: View {
+    @ObservedObject var model: AppModel
+    let others: Int
+    var body: some View {
+        Button { model.navigate(.activity(detail: nil)); model.windows?.focus() } label: {
+            Text("+\(others)").font(TypeScale.badge).monospacedDigit().foregroundStyle(Ink.primary)
+                .padding(.horizontal, 8).frame(height: 20)
+                .background(Capsule().fill(Ink.elevated))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressScale())
+        .help(others == 1 ? "1 other activity" : "\(others) other activities")
+        .accessibilityLabel(others == 1 ? "1 other activity, show all" : "\(others) other activities, show all")
+        .reveal(.detail, stagger: 0.03)
+    }
+}
+
+/// One half of the split island. Hovering highlights just this region; the surface doesn't move.
+private struct SplitRegion: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var media: MediaService
+    @ObservedObject var clock: Clock
+    let item: AppModel.HoverItem
+    let others: Int
+    @State private var hovering = false
+    var body: some View {
+        HStack(spacing: 8) {
+            Button { model.openHoverItem(item) } label: {
+                HoverItemLabel(model: model, media: media, clock: clock, item: item, compact: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressScale())
+            .help("\(HoverText.destination(item)) · ⌃⌥Space opens the workspace")
+            .accessibilityHint("Opens \(HoverText.destination(item))")
+            HoverItemTrailing(model: model, media: media, item: item, compact: true)
+            if others > 0 { CountChip(model: model, others: others) }
+        }
+        .padding(.horizontal, 8)
+        .frame(maxHeight: .infinity)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Ink.elevated.opacity(hovering ? 0.6 : 0)).padding(.vertical, 8))
+        .onHover { hovering = $0 }
+        .animation(Motion.micro, value: hovering)
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+    }
+}
+
+/// Nothing live: three features that work without any integration or permission.
+private struct QuickAccessRow: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        HStack(spacing: 6) {
+            shortcut(.music, "Music", "music.note", 0)
+            shortcut(.shelf, "Shelf", "tray", 1)
+            shortcut(.tools(nil), "Tools", "square.grid.2x2", 2)
+        }
+        .frame(maxHeight: .infinity)
+    }
+    private func shortcut(_ route: Route, _ title: String, _ symbol: String, _ index: Int) -> some View {
+        QuickShortcut(title: title, symbol: symbol) { model.navigate(route); model.windows?.focus() }
+            .reveal(.primary, stagger: Double(index) * 0.03)
+    }
+}
+
+private struct QuickShortcut: View {
+    let title: String
+    let symbol: String
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: symbol).font(.system(size: 15, weight: .regular)).frame(height: 18)
+                Text(title).font(.system(size: 10.5, weight: .medium))
+            }
+            .foregroundStyle(hovering ? Ink.primary : Ink.silver)
+            .frame(maxWidth: .infinity).frame(height: 42)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Ink.elevated.opacity(hovering ? 0.8 : 0)))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(PressScale())
+        .onHover { hovering = $0 }
+        .animation(Motion.micro, value: hovering)
+        .help("Open \(title) · ⌃⌥Space opens the workspace")
+        .accessibilityLabel("Open \(title)")
+    }
+}
+
+/// Title and detail lines. Elapsed time is appended for running agents; numbers roll in place.
+private struct GlanceText: View {
+    let title: String
+    let detail: String
+    var since: Date?
+    var compact = false
+    var stagger: Double = 0
+    var numeric = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 1 : 2) {
+            Text(title).font(compact ? .system(size: 12.5, weight: .semibold) : TypeScale.cardTitle)
+                .foregroundStyle(Ink.primary).lineLimit(1).truncationMode(.tail)
+                .reveal(.primary, stagger: stagger)
+            HStack(spacing: 4) {
+                Text(detail).contentTransition(numeric ? .numericText(countsDown: true) : .identity)
+                if let since {
+                    Text("·")
+                    ElapsedText(date: since)
+                }
+            }
+            .font(compact ? .system(size: 11) : TypeScale.secondary).foregroundStyle(Ink.secondary).lineLimit(1)
+            .reveal(.secondary)
+        }
+    }
+}
+
+/// Hover wording, from what the record actually says. Nothing is summarised or guessed.
+enum HoverText {
+    static func title(_ record: ActivityRecord) -> String {
+        let event = record.event
+        switch event.lifecycle {
+        case .needsInput, .waiting:
+            return event.agent != nil ? "Input required" : event.title
+        case .failed:
+            switch event.kind {
+            case .ci: return "CI failed"
+            case .build: return "Build failed"
+            case .deploy: return "Deploy failed"
+            case .download: return "Download failed"
+            default: return "\(event.title) failed"
+            }
+        case .running, .starting, .queued:
+            switch event.kind {
+            case .build: return "Build in progress"
+            case .ci: return "CI running"
+            case .deploy: return "Deploying"
+            default: return event.title
+            }
+        default:
+            return event.title
         }
     }
 
-    private func open(_ lead: AppModel.GlanceLead) {
-        switch lead {
-        case .notification: model.viewNotificationDetails()
-        case .activity(let record): model.navigate(.activity(detail: record.id))
-        case .music: model.navigate(.music)
-        case .timer: model.navigate(.activity(detail: nil))
-        case .idle, .privacy: model.openWorkspace()
+    static func subtitle(_ record: ActivityRecord) -> String {
+        let event = record.event
+        if let agent = event.agent, [.needsInput, .waiting].contains(event.lifecycle) {
+            let ask = agent.state == .awaitingAuthorization || event.request != nil
+                ? "\(event.title) needs your approval" : "\(event.title) is waiting for you"
+            return [ask, event.project].compactMap { $0 }.joined(separator: " · ")
         }
-        model.windows?.focus()
+        if [.build, .ci, .deploy].contains(event.kind) {
+            return [event.title, event.branch ?? event.project].compactMap { $0 }.joined(separator: " · ")
+        }
+        return ActivityText.subtitle(record)
+    }
+
+    /// Elapsed time is useful for live agent sessions, not for things that already say when.
+    static func showsElapsed(_ record: ActivityRecord) -> Bool {
+        record.event.agent != nil && [.running, .starting].contains(record.event.lifecycle)
+    }
+
+    static func destination(_ item: AppModel.HoverItem) -> String {
+        switch item {
+        case .activity(let record): "Open \(record.event.title)"
+        case .music: "Open Music"
+        case .timer: "Open the timer"
+        }
     }
 }
 
