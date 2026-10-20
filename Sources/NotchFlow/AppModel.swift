@@ -281,21 +281,116 @@ struct CommandItem: Identifiable {
     }
     var hasBandStatus: Bool { leadingStatus != nil || trailingStatus != nil }
 
-    enum GlanceLead: Equatable { case privacy, notification(ActivityRecord), activity(ActivityRecord), music, timer, idle }
+    // MARK: Hover
+
+    /// One thing the hover can show. Activities are read live from the queue, so their text updates
+    /// in place without changing which item is shown.
+    enum HoverItem: Equatable { case activity(ActivityRecord), music, timer }
+    enum GlanceLead: Equatable {
+        case privacy
+        case notification(ActivityRecord)
+        /// The most relevant item and how many other activities there are.
+        case single(HoverItem, others: Int)
+        /// Ambient (music or a timer) on the left, work that matters on the right, one surface.
+        case split(ambient: HoverItem, work: HoverItem, others: Int)
+        /// Nothing live: shortcuts to features that need no integration or permission.
+        case quickAccess
+    }
+
+    /// What the hover shows. Stored, not recomputed per render, so background updates don't
+    /// reshuffle it; `refreshedHoverChoice` applies the stability rules in `HoverPolicy`.
+    @Published private(set) var hoverChoice: HoverChoice = .quickAccess
+    private var hoverLockedUntil = Date.distantPast
+
     var glanceLead: GlanceLead {
         if preferences.privacy { return .privacy }
         if case .notification(let id) = glance, let record = record(id) { return .notification(record) }
-        let ranked = rankedActivities
-        if let top = ranked.first, ActivityRanking.score(top, context: rankingContext) >= 600 { return .activity(top) }
-        if preferences.mediaEnabled && media.playing { return .music }
-        if countdown.exists { return .timer }
-        if let top = ranked.first { return .activity(top) }
-        return .idle
+        guard let primary = hoverChoice.primary, let item = hoverItem(primary) else { return .quickAccess }
+        if let secondary = hoverChoice.secondary, let other = hoverItem(secondary) {
+            return primary.family.isAmbient ? .split(ambient: item, work: other, others: hoverChoice.others)
+                                            : .split(ambient: other, work: item, others: hoverChoice.others)
+        }
+        return .single(item, others: hoverChoice.others)
     }
-    /// How many stacked layers peek out under the glance (the lead plus up to two more).
+
+    /// How many stacked layers peek out under a single activity (up to two).
     var glanceStackDepth: Int {
-        guard case .activity = glanceLead else { return 0 }
-        return min(2, max(0, stackCount - 1))
+        guard case .single(.activity, let others) = glanceLead else { return 0 }
+        return min(2, others)
+    }
+
+    private func hoverItem(_ candidate: HoverCandidate) -> HoverItem? {
+        switch candidate.family {
+        case .music: return preferences.mediaEnabled && media.playing && media.hasTrack ? .music : nil
+        case .timer: return countdown.exists ? .timer : nil
+        default: return record(candidate.id).map(HoverItem.activity)
+        }
+    }
+
+    /// Every live thing that could be shown, from the existing providers. No polling: this is read
+    /// when state changes (ingest, media, timer, context, expiry) and when a hover begins.
+    var hoverCandidates: [HoverCandidate] {
+        var list = visibleActivities.map { record in
+            HoverCandidate(id: record.id, tier: hoverTier(record), family: hoverFamily(record.event), updated: record.event.timestamp)
+        }
+        if preferences.mediaEnabled, media.playing, media.hasTrack {
+            list.append(HoverCandidate(id: "music", tier: .music, family: .music, updated: .distantPast))
+        }
+        if countdown.exists {
+            list.append(HoverCandidate(id: "timer", tier: countdown.running ? .imminent : .general, family: .timer, updated: .distantPast))
+        }
+        return list
+    }
+
+    private func hoverTier(_ record: ActivityRecord) -> HoverTier {
+        let event = record.event
+        switch event.lifecycle {
+        case .needsInput, .waiting: return .input
+        case .failed: return .failure
+        default: break
+        }
+        if record.isPinned { return .pinned }
+        if event.kind == .meeting { return .imminent }
+        guard [.running, .starting, .queued].contains(event.lifecycle) else { return .general }
+        if contextBoost.contains(event.kind) { return .foreground }
+        return [.agent, .build, .ci, .deploy, .task].contains(event.kind) ? .running : .general
+    }
+
+    private func hoverFamily(_ event: ActivityEvent) -> HoverFamily {
+        switch event.kind {
+        case .agent: .agent
+        case .build, .ci, .deploy, .task: .pipeline
+        case .download: .download
+        case .meeting: .meeting
+        case .timer: .timer
+        case .system: .other
+        }
+    }
+
+    private func refreshedHoverChoice(fresh: Bool = false) -> HoverChoice {
+        let previewing = interaction.presentation == .preview
+        let situation = HoverPolicy.Situation(hovered: !fresh && previewing && windows?.pointerInside == true,
+                                              locked: !fresh && Date() < hoverLockedUntil,
+                                              allowSplit: SurfaceLayout.splitFits(geometry))
+        return HoverPolicy.choose(hoverCandidates, current: fresh ? nil : hoverChoice, situation: situation)
+    }
+
+    /// Same items in the same places: a refresh that changes nothing visible commits nothing.
+    private func sameHover(_ a: HoverChoice, _ b: HoverChoice) -> Bool {
+        a.primary?.id == b.primary?.id && a.secondary?.id == b.secondary?.id && a.others == b.others
+    }
+
+    /// A control in the preview is being used: keep what's shown for a moment.
+    func lockHover(_ seconds: TimeInterval = 2) { hoverLockedUntil = Date().addingTimeInterval(seconds) }
+
+    /// Opens what a hover item stands for, straight to its destination.
+    func openHoverItem(_ item: HoverItem) {
+        switch item {
+        case .activity(let record): navigate(.activity(detail: record.id))
+        case .music: navigate(.music)
+        case .timer: navigate(.tools(.timer))
+        }
+        windows?.focus()
     }
 
     func timerLabel(at date: Date) -> String {
@@ -356,13 +451,21 @@ struct CommandItem: Identifiable {
     }
 
     /// Content changed in a way that may change the surface size.
-    func reflow(animation: Animation? = nil) { commit(snapshot, animation: animation ?? Motion.quick) }
+    func reflow(animation: Animation? = nil) {
+        let choice = refreshedHoverChoice()
+        let changed = !sameHover(choice, hoverChoice)
+        commit(snapshot, animation: animation ?? Motion.quick, also: changed ? { self.hoverChoice = choice } : nil)
+    }
 
     /// The one path to any visual change: compute the next form from the snapshot, grow the panel
     /// first if needed, apply everything in a single animated transaction, trim the panel after.
     /// Springs retarget from their current value, so an interrupted transition reverses smoothly.
     private func commit(_ next: PresentationSnapshot, animation: Animation? = nil, also: (() -> Void)? = nil) {
         let previous = snapshot, previousForm = form
+        // A hover starting picks freshly from what's live now; what it shows then stays put while hovered.
+        if next.interaction.presentation == .preview, previous.interaction.presentation == .collapsed {
+            hoverChoice = refreshedHoverChoice(fresh: true)
+        }
         // Opening the workspace freezes the stack's order first, so the form is sized for those rows.
         if next.interaction.presentation == .expanded, previous.interaction.presentation != .expanded {
             workspaceActivityIDs = rankedActivities.map(\.id)
@@ -445,7 +548,9 @@ struct CommandItem: Identifiable {
             if let record = record(event.key), [.completed, .cancelled].contains(record.event.lifecycle),
                workspaceActivityIDs.contains(record.id), !record.isPinned { scheduleRetraction(record.id) }
             scheduleExpiryRefresh()
-            if let order { commit(snapshot, animation: Motion.quick, also: { self.workspaceActivityIDs = order }) } else { reflow() }
+            if let order {
+                commit(snapshot, animation: Motion.quick, also: { self.workspaceActivityIDs = order; self.hoverChoice = self.refreshedHoverChoice() })
+            } else { reflow() }
         } catch { message = error.localizedDescription }
     }
 
@@ -806,7 +911,7 @@ struct CommandItem: Identifiable {
     }
     func toggleTimer() {
         if countdown.running { countdown.pause() } else { countdown.resume() }
-        persistTimer(); clock.run(countdown.running); objectWillChange.send()
+        persistTimer(); clock.run(countdown.running); reflow()
     }
     func cancelTimer() { countdown.cancel(); persistTimer(); clock.run(false); reflow() }
     private func tick(_ date: Date) {

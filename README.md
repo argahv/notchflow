@@ -178,7 +178,7 @@ python3 -I Tests/test_bridge.py
   motion), `Surfaces` (features), `Features` (providers and services), `Window` (panel, input, geometry).
 - `Scripts`: the project generator, the event CLI and agent hooks, and build and notarization scripts.
 
-Design and architecture: [Obsidian & Silver design](docs/obsidian-silver/01-design.md) ·
+Design and architecture: [Obsidian & Silver design](docs/obsidian-silver/01-design.md) · [dynamic hover](docs/obsidian-silver/03-dynamic-hover.md) ·
 [activity engine](docs/architecture/activity-engine.md) · [agent integrations](docs/architecture/agent-integrations.md) ·
 [context engine](docs/architecture/context-engine.md) · [motion](docs/design/motion-system.md) ·
 [acceptance tests](docs/testing/acceptance-tests.md).
