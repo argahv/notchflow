@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Live tasks as compact capsules. Choosing one grows it in place into a detail card; nothing
-/// navigates away, and rows that finish while the workspace is open keep their position.
+/// The expanded task stack. Rows keep their place while it's open; choosing one grows it in place
+/// into a detail card. Hide (stack only), Remove (History) and the task's own lifecycle are separate.
 struct ActivitySurface: View {
     @ObservedObject var model: AppModel
     var body: some View {
@@ -9,11 +9,9 @@ struct ActivitySurface: View {
         let rows = model.displayedActivities(detail: detail)
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: Metrics.gap) {
+                FilterBar(model: model).reveal(.secondary)
                 if rows.isEmpty {
-                    CompactEmptyState(symbol: "checkmark.circle", tone: .mint, title: "Nothing needs you",
-                                      detail: "Agent and build events appear here as tasks publish updates.")
-                        .frame(height: Metrics.emptyRow)
-                        .reveal(.primary)
+                    emptyState.frame(height: Metrics.emptyRow).reveal(.primary)
                 }
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, record in
                     ActivityCapsule(model: model, record: record, expanded: detail == record.id)
@@ -27,6 +25,57 @@ struct ActivitySurface: View {
             .padding(.top, 10).padding(.bottom, Metrics.pad).padding(.horizontal, Metrics.pad)
         }
         .scrollIndicators(.automatic)
+    }
+
+    @ViewBuilder private var emptyState: some View {
+        switch model.activityFilter {
+        case .all:
+            CompactEmptyState(symbol: "checkmark.circle", tone: .mint, title: "Nothing needs you",
+                              detail: "Agent, build and download activity appears here as it happens.")
+        case .agents:
+            CompactEmptyState(symbol: "sparkles", tone: .iris, title: "No agents running",
+                              detail: "Claude Code and Codex sessions appear here once their hooks are set up.")
+        case .pipelines:
+            CompactEmptyState(symbol: "hammer", tone: .blue, title: "No pipelines running",
+                              detail: "Commands wrapped with notchflow run appear here while they run.")
+        case .downloads:
+            CompactEmptyState(symbol: "arrow.down.circle", tone: .blue, title: "No recent downloads",
+                              detail: "Download tracking isn't available yet.")
+        case .done:
+            CompactEmptyState(symbol: "clock", tone: .neutral, title: "Nothing finished today",
+                              detail: "Completed work collects here for a day, and in History for longer.")
+        }
+    }
+}
+
+/// Category filter; the selection pill slides between choices.
+private struct FilterBar: View {
+    @ObservedObject var model: AppModel
+    @Namespace private var selection
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(AppModel.ActivityFilter.allCases) { filter in
+                let selected = model.activityFilter == filter
+                Button { model.setFilter(filter) } label: {
+                    Text(filter.title).font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(selected ? Ink.primary : Ink.secondary)
+                        .padding(.horizontal, 10).frame(height: Metrics.filterBar - 4)
+                        .background {
+                            if selected {
+                                Capsule().fill(Ink.elevated).matchedGeometryEffect(id: "filter", in: selection)
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(2)
+        .frame(height: Metrics.filterBar)
+        .background(Capsule().fill(Ink.obsidian.opacity(0.8)))
+        .animation(Motion.selection, value: model.activityFilter)
     }
 }
 
@@ -42,14 +91,18 @@ struct ActivityCapsule: View {
         VStack(alignment: .leading, spacing: 0) {
             Button { model.toggleDetail(record.id) } label: {
                 HStack(spacing: 12) {
-                    ToneGlyph(symbol: SourceGlyph.symbol(for: event.source), tone: event.phase.tone, size: 30)
+                    ToneGlyph(symbol: SourceGlyph.symbol(for: event), tone: event.lifecycle.tone, size: 30)
                         .nookMatched("lead-\(record.id)", in: namespace)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(event.title).font(TypeScale.cardTitle).foregroundStyle(Ink.primary).lineLimit(1)
+                        HStack(spacing: 5) {
+                            Text(event.title).font(TypeScale.cardTitle).foregroundStyle(Ink.primary).lineLimit(1)
+                            if record.isPinned {
+                                Image(systemName: "pin.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(Ink.iris)
+                                    .accessibilityLabel("Pinned")
+                            }
+                        }
                         HStack(spacing: 4) {
-                            Text(event.source)
-                            Text("·")
-                            Text(event.phase.label).foregroundStyle(event.phase.tone.color)
+                            Text(ActivityText.subtitle(record))
                             Text("·")
                             ElapsedText(date: event.timestamp)
                         }
@@ -65,32 +118,46 @@ struct ActivityCapsule: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(event.title), \(event.source), \(event.phase.label)")
+            .accessibilityLabel("\(event.title), \(ActivityText.subtitle(record))")
             .accessibilityHint(expanded ? "Collapses details" : "Shows details")
 
             if expanded {
                 detail(event).transition(.opacity)
             }
         }
-        .nookMaterial(expanded ? .elevated : .interactive, hovering: hovering && !expanded)
+        .background {
+            // The capsule's own surface is the shared element the glance's stack layers grow into.
+            let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
+            shape.fill(expanded || hovering ? Ink.elevated : Ink.surface.opacity(0.92))
+                .overlay(shape.strokeBorder(LinearGradient(colors: [.white.opacity(hovering || expanded ? 0.1 : 0.055), .white.opacity(0.012)],
+                                                           startPoint: .top, endPoint: .bottom), lineWidth: 0.75))
+                .shadow(color: .black.opacity(expanded ? 0.4 : 0), radius: 12, y: 6)
+                .nookMatched("stack-\(record.id)", in: namespace)
+        }
         .onHover { hovering = $0 }
         .animation(Motion.micro, value: hovering)
     }
 
     /// Determinate progress only when the publisher sends a real fraction; otherwise a spinner.
     @ViewBuilder private func status(_ event: ActivityEvent) -> some View {
-        if !event.phase.terminal && event.phase != .waiting {
+        switch event.lifecycle {
+        case .running, .starting:
             if let progress = event.progress {
                 Text("\(Int(progress * 100))%").font(TypeScale.numeral).foregroundStyle(Ink.blue)
             } else {
-                ProgressView().controlSize(.mini).tint(Ink.blue)
+                ProgressView().controlSize(.mini).tint(Ink.blue).accessibilityLabel("In progress")
             }
+        case .completed, .failed, .needsInput, .waiting:
+            Image(systemName: event.lifecycle.symbol).font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(event.lifecycle.tone.color).accessibilityLabel(event.lifecycle.label)
+        default:
+            EmptyView()
         }
     }
 
     private func detail(_ event: ActivityEvent) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let progress = event.progress, !event.phase.terminal {
+            if let progress = event.progress, !event.lifecycle.terminal {
                 ProgressLine(value: progress, tone: .blue)
             }
             if let summary = event.summary, !summary.isEmpty {
@@ -99,14 +166,23 @@ struct ActivityCapsule: View {
             }
             HStack(spacing: 8) {
                 if event.actionURL != nil {
-                    Button { model.openAction(record) } label: { Label("Return to task", systemImage: "arrow.up.forward") }
-                        .buttonStyle(PillButtonStyle(prominent: true, tone: event.phase == .failed ? .coral : .iris))
+                    Button { model.openAction(record) } label: { Label("Open", systemImage: "arrow.up.forward") }
+                        .buttonStyle(PillButtonStyle(prominent: true, tone: event.lifecycle == .failed ? .coral : .iris))
                 }
-                if !event.phase.terminal {
+                if !event.lifecycle.terminal {
                     Button("Snooze 10 min") { model.snooze(record) }.buttonStyle(PillButtonStyle())
                 }
-                Button("Remove") { model.removeRecord(record) }.buttonStyle(PillButtonStyle())
+                if event.lifecycle.terminal {
+                    Button("Remove from History") { model.removeRecord(record) }.buttonStyle(PillButtonStyle())
+                }
                 Spacer(minLength: 0)
+                Button { model.togglePin(record) } label: { Image(systemName: record.isPinned ? "pin.slash" : "pin") }
+                    .buttonStyle(IconButtonStyle(size: 26, tint: record.isPinned ? Ink.iris : Ink.secondary))
+                    .help(record.isPinned ? "Unpin" : "Pin to the stack").accessibilityLabel(record.isPinned ? "Unpin" : "Pin")
+                Button { model.hideFromStack(record) } label: { Image(systemName: "eye.slash") }
+                    .buttonStyle(IconButtonStyle(size: 26, tint: Ink.secondary))
+                    .help("Hide from the stack — stays in History; the task itself is unaffected")
+                    .accessibilityLabel("Hide from stack")
             }
             .frame(height: 26)
         }

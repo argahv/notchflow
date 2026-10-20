@@ -66,7 +66,7 @@ private struct HistoryRow: View {
                     rail(event)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(event.title).font(.system(size: 13, weight: .medium)).foregroundStyle(Ink.primary).lineLimit(1)
-                        Text("\(event.source) · \(event.phase.label) · \(event.timestamp.formatted(date: .omitted, time: .shortened))")
+                        Text("\(ActivityText.subtitle(record)) · \(event.timestamp.formatted(date: .omitted, time: .shortened))")
                             .font(TypeScale.secondary).foregroundStyle(Ink.secondary).lineLimit(1)
                     }
                     Spacer(minLength: 4)
@@ -82,7 +82,7 @@ private struct HistoryRow: View {
             .buttonStyle(.plain)
             .onHover { hovering = $0 }
             .animation(Motion.micro, value: hovering)
-            .accessibilityLabel("\(event.title), \(event.source), \(event.phase.label)")
+            .accessibilityLabel("\(event.title), \(ActivityText.subtitle(record))")
 
             if expanded {
                 VStack(alignment: .leading, spacing: 10) {
@@ -112,7 +112,7 @@ private struct HistoryRow: View {
                 Rectangle().fill(first ? .clear : Ink.hover).frame(width: 1)
                 Rectangle().fill(last ? .clear : Ink.hover).frame(width: 1)
             }
-            Circle().fill(event.phase.tone.color).frame(width: 7, height: 7)
+            Circle().fill(event.lifecycle.tone.color).frame(width: 7, height: 7)
                 .overlay(Circle().strokeBorder(Ink.obsidian, lineWidth: 1.5).frame(width: 11, height: 11))
         }
         .frame(width: 18, height: Metrics.historyRow)

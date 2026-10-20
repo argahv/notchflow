@@ -49,6 +49,17 @@ final class ActivityEngineTests: XCTestCase {
         XCTAssertEqual(queue.records.count, 1)
     }
 
+    func testFailuresStayInTheStackForAnHourAndCompletionsLeave() throws {
+        var queue = ActivityQueue()
+        try queue.ingest(agentEvent(.failed), now: now)
+        try queue.ingest(ActivityEvent(source: "build", activityId: "b", state: .completed, title: "Build", category: .build, timestamp: now), now: now)
+        XCTAssertEqual(queue.visible(now: now).map(\.id), ["claude-code:s1"])
+        XCTAssertTrue(queue.visible(now: now.addingTimeInterval(ActivityQueue.failureWindow + 1)).isEmpty)
+        queue.dismiss("claude-code:s1", at: now)
+        XCTAssertTrue(queue.visible(now: now).isEmpty, "hiding a failure takes it out of the stack")
+        XCTAssertEqual(queue.records.count, 2, "both stay in History")
+    }
+
     func testDismissHidesUntilTheStateChangesAndPinsStayVisible() throws {
         var queue = ActivityQueue()
         try queue.ingest(agentEvent(.running), now: now)

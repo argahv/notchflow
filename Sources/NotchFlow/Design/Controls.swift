@@ -98,11 +98,16 @@ struct RowButtonStyle: ButtonStyle {
 struct DockButtonStyle: ButtonStyle {
     let selected: Bool
     var badge: Tone?
-    func makeBody(configuration: Configuration) -> some View { StyledButton(configuration: configuration, selected: selected, badge: badge) }
+    /// Route buttons share one sliding selection; toggles (pin) light up in place.
+    var slides = true
+    func makeBody(configuration: Configuration) -> some View {
+        StyledButton(configuration: configuration, selected: selected, badge: badge, slides: slides)
+    }
     private struct StyledButton: View {
         let configuration: ButtonStyleConfiguration
         let selected: Bool
         let badge: Tone?
+        let slides: Bool
         @Environment(\.nookNamespace) private var namespace
         @State private var hovering = false
         var body: some View {
@@ -112,7 +117,7 @@ struct DockButtonStyle: ButtonStyle {
                 .frame(width: 26, height: 24)
                 .background {
                     if selected {
-                        Capsule().fill(Ink.iris.opacity(0.17)).nookMatched("dock-selection", in: namespace)
+                        Capsule().fill(Ink.iris.opacity(0.17)).nookMatched("dock-selection", in: slides ? namespace : nil)
                     } else if hovering {
                         Capsule().fill(Ink.hover.opacity(0.75))
                     }

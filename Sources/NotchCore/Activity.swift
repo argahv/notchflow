@@ -250,13 +250,18 @@ public struct ActivityQueue: Codable, Sendable {
         records.removeAll { $0.event.lifecycle.terminal && $0.event.timestamp < cutoff && !$0.isPinned }
     }
 
-    /// Live work: not finished (unless pinned), not snoozed, not dismissed, not expired.
+    /// How long a failure stays in the stack before it's only in History, unless hidden sooner.
+    public static let failureWindow: TimeInterval = 3600
+
+    /// The stack: live work, plus failures from the last hour (they still need a look). Excludes
+    /// snoozed, hidden and expired records; pinned records always stay.
     public func visible(now: Date = Date()) -> [ActivityRecord] {
         records.filter { record in
             guard record.dismissedAt == nil, (record.snoozedUntil ?? .distantPast) <= now else { return false }
             if record.isPinned { return true }
-            return !record.event.lifecycle.terminal &&
-                (record.event.expiresAt ?? record.event.timestamp.addingTimeInterval(3600)) > now
+            let event = record.event
+            if event.lifecycle == .failed { return event.timestamp.addingTimeInterval(Self.failureWindow) > now }
+            return !event.lifecycle.terminal && (event.expiresAt ?? event.timestamp.addingTimeInterval(3600)) > now
         }.sorted {
             if $0.event.phase.priority != $1.event.phase.priority {
                 return $0.event.phase.priority > $1.event.phase.priority

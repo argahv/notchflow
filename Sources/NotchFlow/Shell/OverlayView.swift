@@ -83,11 +83,26 @@ struct NotchBand: View {
             case .privacy:
                 Image(systemName: "eye.slash").font(.system(size: 11, weight: .semibold)).foregroundStyle(Ink.secondary)
                     .accessibilityLabel("Private details hidden")
-            case .activity(let record):
-                Image(systemName: "circle.fill").font(.system(size: 7)).foregroundStyle(record.event.phase.tone.color)
-                    .symbolEffect(.bounce, value: reduceMotion ? "" : record.id + record.event.phase.rawValue)
-                    .nookMatched("lead-\(record.id)", in: namespace)
-                    .accessibilityLabel("\(record.event.title), \(record.event.phase.label)")
+            case .activities(let top, let tones, let count):
+                // One dot per live task (up to three), overlapping like a stack; the lead dot travels
+                // into the glance. A count appears only when there is more than one.
+                HStack(spacing: 4) {
+                    HStack(spacing: -2) {
+                        ForEach(Array(tones.enumerated()), id: \.offset) { index, tone in
+                            Circle().fill(tone.color).frame(width: 7, height: 7)
+                                .padding(1.5).background(Circle().fill(Color.black))
+                                .zIndex(Double(-index))
+                                .nookMatched("lead-\(top.id)", in: index == 0 ? namespace : nil)
+                        }
+                    }
+                    if count > 1 {
+                        Text("\(count)").font(TypeScale.badge).monospacedDigit().foregroundStyle(Ink.secondary)
+                            .contentTransition(.numericText()).animation(Motion.micro, value: count)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(count > 1 ? "\(count) activities. Most urgent: \(top.event.title), \(top.event.lifecycle.label)"
+                                              : "\(top.event.title), \(top.event.lifecycle.label)")
             case .music:
                 Group {
                     if let artwork = media.artwork { ArtworkView(image: artwork, size: 18) }
@@ -147,7 +162,7 @@ struct NotchBand: View {
             }
             Spacer(minLength: 4)
             dockButton(symbol: model.interaction.pinned ? "pin.fill" : "pin", help: model.interaction.pinned ? "Unpin" : "Keep open",
-                       selected: model.interaction.pinned, index: 6) {
+                       selected: model.interaction.pinned, slides: false, index: 6) {
                 model.send(.togglePin)
             }
             Menu {
@@ -174,13 +189,20 @@ struct NotchBand: View {
                    selected: model.route.feature == feature, badge: feature == .activity ? model.dockBadge : nil, index: index) {
             model.open(feature)
         }
+        // A finished task retracting into History lands here with a small acknowledgement.
+        .keyframeAnimator(initialValue: 1.0, trigger: feature == .history ? model.historyPulse : nil) { content, scale in
+            content.scaleEffect(scale)
+        } keyframes: { _ in
+            SpringKeyframe(Motion.reduced ? 1 : 1.22, duration: 0.14)
+            SpringKeyframe(1, duration: 0.3)
+        }
         .accessibilityLabel(feature.title)
     }
 
-    private func dockButton(symbol: String, help: String, selected: Bool, badge: Tone? = nil, index: Int,
+    private func dockButton(symbol: String, help: String, selected: Bool, badge: Tone? = nil, slides: Bool = true, index: Int,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: symbol) }
-            .buttonStyle(DockButtonStyle(selected: selected, badge: badge))
+            .buttonStyle(DockButtonStyle(selected: selected, badge: badge, slides: slides))
             .help(help)
             .accessibilityAddTraits(selected ? .isSelected : [])
             .reveal(.secondary, stagger: Double(index) * 0.022)
@@ -211,7 +233,28 @@ struct GlanceView: View {
 
     var body: some View {
         let lead = model.glanceLead
-        HStack(spacing: 12) { content(lead) }
+        let depth = model.glanceStackDepth
+        VStack(spacing: 0) {
+            HStack(spacing: 12) { content(lead) }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if depth > 0 {
+                // The next tasks peek out beneath the lead like stacked cards; opening the stack
+                // separates each layer into its own row.
+                VStack(spacing: 2) {
+                    ForEach(Array(model.rankedActivities.dropFirst().prefix(depth).enumerated()), id: \.element.id) { index, record in
+                        // Each layer carries a trace of its task's tone so a failure underneath still reads.
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(Ink.hover.opacity(index == 0 ? 0.95 : 0.6))
+                            .overlay(RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                .fill(record.event.lifecycle.tone.color.opacity(index == 0 ? 0.28 : 0.18)))
+                            .frame(height: 3)
+                            .padding(.horizontal, 14 + CGFloat(index) * 14)
+                            .nookMatched("stack-\(record.id)", in: namespace)
+                    }
+                }
+                .frame(height: Metrics.stackLayer * Double(depth) + 4, alignment: .top)
+            }
+        }
             .padding(.horizontal, model.form.ear + 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
@@ -229,22 +272,34 @@ struct GlanceView: View {
             Spacer(minLength: 8)
         case .notification(let record):
             // Severity reads first: the glyph, then the message, then its source, then the actions.
-            ToneGlyph(symbol: record.event.phase.symbol, tone: record.event.phase.tone, size: 30)
+            ToneGlyph(symbol: record.event.lifecycle.symbol, tone: record.event.lifecycle.tone, size: 30)
                 .nookMatched("lead-\(record.id)", in: namespace).reveal(.primary)
-            text(record.event.title, "\(record.event.source) · \(record.event.phase.label)", titleStagger: 0.03)
+            text(record.event.title, ActivityText.subtitle(record), titleStagger: 0.03)
             Spacer(minLength: 8)
             Button("View") { model.viewNotificationDetails() }
-                .buttonStyle(PillButtonStyle(prominent: true, tone: record.event.phase.tone))
+                .buttonStyle(PillButtonStyle(prominent: true, tone: record.event.lifecycle.tone))
                 .reveal(.detail)
             Button { model.dismissNotification() } label: { Image(systemName: "xmark") }
                 .buttonStyle(IconButtonStyle(size: 24, tint: Ink.secondary)).accessibilityLabel("Dismiss")
                 .reveal(.detail, stagger: 0.03)
         case .activity(let record):
-            ToneGlyph(symbol: SourceGlyph.symbol(for: record.event.source), tone: record.event.phase.tone, size: 30)
+            ToneGlyph(symbol: SourceGlyph.symbol(for: record.event), tone: record.event.lifecycle.tone, size: 30)
                 .nookMatched("lead-\(record.id)", in: namespace).reveal(.primary)
-            text(record.event.title, "\(record.event.source) · \(record.event.phase.label)", titleStagger: 0.03)
+            text(record.event.title, ActivityText.subtitle(record), titleStagger: 0.03)
             Spacer(minLength: 8)
-            Image(systemName: "chevron.down").font(.caption.weight(.semibold)).foregroundStyle(Ink.muted).reveal(.detail)
+            if model.stackCount > 1 {
+                Button { model.navigate(.activity(detail: nil)); model.windows?.focus() } label: {
+                    Text("+\(model.stackCount - 1)").font(TypeScale.badge).monospacedDigit().foregroundStyle(Ink.primary)
+                        .padding(.horizontal, 8).frame(height: 20)
+                        .background(Capsule().fill(Ink.elevated))
+                }
+                .buttonStyle(.plain)
+                .help("Show all \(model.stackCount) activities")
+                .accessibilityLabel("Show all \(model.stackCount) activities")
+                .reveal(.detail)
+            } else {
+                Image(systemName: "chevron.down").font(.caption.weight(.semibold)).foregroundStyle(Ink.muted).reveal(.detail)
+            }
         case .music:
             ArtworkView(image: media.artwork, size: 36).nookMatched("music-art", in: namespace).reveal(.primary)
             text(media.hasTrack ? media.title : "Music", media.artist.isEmpty ? (media.playing ? "Playing" : "Paused") : media.artist, titleStagger: 0.03)

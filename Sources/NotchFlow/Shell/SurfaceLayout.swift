@@ -9,6 +9,8 @@ enum Metrics {
     static let dockWing = 146.0
     static let workspaceWidth = 500.0
     static let glanceHeight = 64.0
+    static let stackLayer = 5.0
+    static let filterBar = 26.0
     static let pad = 14.0
     static let gap = 8.0
     static let header = 28.0
@@ -60,7 +62,9 @@ enum Metrics {
             return resolve(.content(width: display.notchWidth + 2 * wing + (aware ? 16 : 0), height: aware ? 5 : 0, maxHeight: 40),
                            wing: wing, ear: status || aware ? 6 : 2, corner: status || aware ? 12 : 9)
         case .preview:
-            return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing, height: Metrics.glanceHeight),
+            let depth = Double(model.glanceStackDepth)
+            return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing,
+                                    height: Metrics.glanceHeight + (depth > 0 ? Metrics.stackLayer * depth + 4 : 0)),
                            wing: Metrics.glanceWing, ear: 10, corner: 22)
         case .expanded:
             let width = max(Metrics.workspaceWidth, display.notchWidth + 2 * Metrics.dockWing)
@@ -80,7 +84,7 @@ enum Metrics {
         switch snapshot.route {
         case .activity(let detail):
             let rows = model.displayedActivities(detail: detail)
-            var height = 10.0
+            var height = 10.0 + Metrics.filterBar + Metrics.gap
             height += rows.isEmpty ? Metrics.emptyRow : stack(rows.count, Metrics.activityRow)
             if let detail, let record = rows.first(where: { $0.id == detail }) { height += detailHeight(record) }
             return height + 12 + Metrics.timerStrip + pad

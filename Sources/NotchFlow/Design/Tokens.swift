@@ -89,6 +89,44 @@ extension ActivityPhase {
     var label: String { rawValue.capitalized }
 }
 
+extension ActivityState {
+    var tone: Tone {
+        switch self {
+        case .needsInput, .waiting: .amber
+        case .failed: .coral
+        case .completed: .mint
+        case .running, .starting: .blue
+        case .queued, .paused, .cancelled, .unknown: .neutral
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .needsInput: "hand.raised.fill"
+        case .waiting: "ellipsis.bubble.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        case .completed: "checkmark.circle.fill"
+        case .cancelled: "minus.circle"
+        case .paused: "pause.circle"
+        case .queued: "clock"
+        case .running, .starting, .unknown: "circle.dotted"
+        }
+    }
+    var label: String {
+        switch self {
+        case .needsInput: "Needs input"
+        case .waiting: "Waiting"
+        case .failed: "Failed"
+        case .completed: "Completed"
+        case .cancelled: "Cancelled"
+        case .paused: "Paused"
+        case .queued: "Queued"
+        case .starting: "Starting"
+        case .running: "Running"
+        case .unknown: "Unknown"
+        }
+    }
+}
+
 extension AttentionPriority {
     var tone: Tone {
         switch self {
@@ -101,8 +139,21 @@ extension AttentionPriority {
     }
 }
 
-/// A recognizable glyph for an event publisher, from its free-form source name.
+/// A recognizable glyph for an event: its declared category first, then its free-form source name.
 enum SourceGlyph {
+    static func symbol(for event: ActivityEvent) -> String {
+        switch event.category {
+        case .agent: "sparkles"
+        case .ci: "arrow.triangle.branch"
+        case .build: "hammer"
+        case .deploy: "shippingbox"
+        case .download: "arrow.down.circle"
+        case .timer: "timer"
+        case .meeting: "video"
+        case .system: "gearshape"
+        case .task, nil: symbol(for: event.source)
+        }
+    }
     static func symbol(for source: String) -> String {
         let words = Set(source.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init))
         func has(_ candidates: String...) -> Bool { !words.isDisjoint(with: candidates) }
@@ -113,5 +164,34 @@ enum SourceGlyph {
         if has("timer", "focus") { return "timer" }
         if has("terminal", "shell", "zsh", "bash") { return "terminal" }
         return "bolt.horizontal"
+    }
+}
+
+extension AgentState {
+    /// Labels only for what the provider's events justify; "working" follows a submitted prompt.
+    func label(tool: String?) -> String {
+        switch self {
+        case .idle: "Ready"
+        case .starting: "Starting"
+        case .working: "Working"
+        case .executingTool: tool.map { "Running \($0)" } ?? "Running a tool"
+        case .waitingForUser: "Waiting for you"
+        case .awaitingAuthorization: tool.map { "Needs permission · \($0)" } ?? "Needs permission"
+        case .completed: "Finished"
+        case .failed: "Failed"
+        case .disconnected: "Ended"
+        case .unknown: "Unknown"
+        }
+    }
+}
+
+/// One-line descriptions shared by the glance, the stack and History.
+enum ActivityText {
+    static func subtitle(_ record: ActivityRecord) -> String {
+        let event = record.event
+        if let agent = event.agent, let state = agent.state {
+            return [event.project, state.label(tool: agent.tool)].compactMap { $0 }.joined(separator: " · ")
+        }
+        return [event.source, event.branch, event.lifecycle.label].compactMap { $0 }.joined(separator: " · ")
     }
 }

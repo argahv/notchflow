@@ -144,9 +144,16 @@ struct CommandItem: Identifiable {
         // Rows keep their place while the workspace is open, including a task that just finished.
         workspaceActivityIDs.compactMap { id in queue.records.first(where: { $0.id == id }) }
     }
-    /// Workspace rows plus the record a notification opened, which may already be terminal.
+    /// The open stack under the current filter, plus the record a notification opened (which may
+    /// already be finished).
     func displayedActivities(detail: String?) -> [ActivityRecord] {
-        var rows = workspaceActivities
+        var rows: [ActivityRecord]
+        if activityFilter == .done {
+            let since = Date().addingTimeInterval(-86_400)
+            rows = Array(queue.records.filter { $0.event.lifecycle.terminal && $0.event.timestamp > since }.prefix(8))
+        } else {
+            rows = workspaceActivities.filter { activityFilter.includes($0.event.kind) }
+        }
         if let detail, !rows.contains(where: { $0.id == detail }), let record = queue.records.first(where: { $0.id == detail }) {
             rows.insert(record, at: 0)
         }
@@ -154,16 +161,43 @@ struct CommandItem: Identifiable {
     }
     func record(_ id: String) -> ActivityRecord? { queue.records.first(where: { $0.id == id }) }
 
-    enum LeadingStatus: Equatable { case privacy, activity(ActivityRecord), music }
+    enum ActivityFilter: String, CaseIterable, Identifiable {
+        case all, agents, pipelines, downloads, done
+        var id: String { rawValue }
+        var title: String {
+            switch self { case .all: "All"; case .agents: "Agents"; case .pipelines: "CI"; case .downloads: "Downloads"; case .done: "Done" }
+        }
+        func includes(_ category: ActivityCategory) -> Bool {
+            switch self {
+            case .all, .done: true
+            case .agents: category == .agent
+            case .pipelines: [.ci, .build, .deploy].contains(category)
+            case .downloads: category == .download
+            }
+        }
+    }
+    @Published private(set) var activityFilter: ActivityFilter = .all
+    /// Bumps when a finished task retracts into History, so History's dock item can acknowledge it.
+    @Published private(set) var historyPulse: UUID?
+    private var retractions: [String: DispatchWorkItem] = [:]
+
+    func setFilter(_ filter: ActivityFilter) {
+        guard filter != activityFilter else { return }
+        commit(snapshot, animation: Motion.quick, also: { self.activityFilter = filter })
+    }
+
+    /// Several live tasks share the band as one stacked indicator instead of competing for it.
+    enum LeadingStatus: Equatable { case privacy, activities(top: ActivityRecord, tones: [Tone], count: Int), music }
     enum TrailingStatus: Equatable { case timer, battery(Int) }
     var leadingStatus: LeadingStatus? {
         if preferences.privacy { return .privacy }
-        let visible = visibleActivities
-        if let waiting = visible.first(where: { $0.event.phase == .waiting }) { return .activity(waiting) }
+        let ranked = rankedActivities
+        let stack = ranked.first.map { LeadingStatus.activities(top: $0, tones: ranked.prefix(3).map(\.event.lifecycle.tone), count: ranked.count) }
+        if let top = ranked.first, ActivityRanking.score(top, context: rankingContext) >= 600 { return stack }
         if preferences.mediaEnabled && media.playing { return .music }
-        if let running = visible.first { return .activity(running) }
-        return nil
+        return stack
     }
+    var stackCount: Int { rankedActivities.count }
     var trailingStatus: TrailingStatus? {
         if countdown.exists { return .timer }
         if preferences.showBattery, let percent = battery.percent { return .battery(percent) }
@@ -175,12 +209,17 @@ struct CommandItem: Identifiable {
     var glanceLead: GlanceLead {
         if preferences.privacy { return .privacy }
         if case .notification(let id) = glance, let record = record(id) { return .notification(record) }
-        let visible = visibleActivities
-        if let waiting = visible.first(where: { $0.event.phase == .waiting }) { return .activity(waiting) }
+        let ranked = rankedActivities
+        if let top = ranked.first, ActivityRanking.score(top, context: rankingContext) >= 600 { return .activity(top) }
         if preferences.mediaEnabled && media.playing { return .music }
         if countdown.exists { return .timer }
-        if let running = visible.first { return .activity(running) }
+        if let top = ranked.first { return .activity(top) }
         return .idle
+    }
+    /// How many stacked layers peek out under the glance (the lead plus up to two more).
+    var glanceStackDepth: Int {
+        guard case .activity = glanceLead else { return 0 }
+        return min(2, max(0, stackCount - 1))
     }
 
     func timerLabel(at date: Date) -> String {
@@ -247,8 +286,12 @@ struct CommandItem: Identifiable {
     /// first if needed, apply everything in a single animated transaction, trim the panel after.
     /// Springs retarget from their current value, so an interrupted transition reverses smoothly.
     private func commit(_ next: PresentationSnapshot, animation: Animation? = nil, also: (() -> Void)? = nil) {
-        let previous = snapshot
-        let nextForm = SurfaceLayout.form(for: next, model: self, previous: form)
+        let previous = snapshot, previousForm = form
+        // Opening the workspace freezes the stack's order first, so the form is sized for those rows.
+        if next.interaction.presentation == .expanded, previous.interaction.presentation != .expanded {
+            workspaceActivityIDs = rankedActivities.map(\.id)
+        }
+        var nextForm = SurfaceLayout.form(for: next, model: self, previous: previousForm)
         guard next != previous || nextForm != form || also != nil else { return }
         let opening = next.interaction.presentation.depth > previous.interaction.presentation.depth
             || (next.interaction.presentation == previous.interaction.presentation && nextForm.size.height >= form.size.height)
@@ -258,7 +301,14 @@ struct CommandItem: Identifiable {
             interaction = next.interaction
             route = next.route
             openNoteID = next.openNoteID
-            also?()
+            if let also {
+                // `also` can change what the surface shows (rows, filter, glance), so the form is
+                // resolved again from the state it leaves. The panel grows synchronously, before
+                // SwiftUI draws this transaction.
+                also()
+                nextForm = SurfaceLayout.form(for: next, model: self, previous: previousForm)
+                if nextForm.size != previousForm.size { windows?.prepare(for: nextForm.size) }
+            }
             form = nextForm
         } completion: { [weak self] in
             self?.windows?.settle(transition)
@@ -271,7 +321,6 @@ struct CommandItem: Identifiable {
 
     private func didCommit(from previous: PresentationSnapshot) {
         let now = interaction.presentation, was = previous.interaction.presentation
-        if was != .expanded && now == .expanded { workspaceActivityIDs = visibleActivities.map(\.id) }
         if now == .collapsed && was != .collapsed {
             if case .notification = glance { glance = .summary; _ = attention.dismissCurrent(now: Date(), context: attentionContext) }
             openedByDrag = false; dropTargeted = false
@@ -314,6 +363,8 @@ struct CommandItem: Identifiable {
                !workspaceActivityIDs.contains(event.key) { workspaceActivityIDs.append(event.key) }
             let updated = record(event.key)?.event
             if updated == event && prior != event { deliver(event) }
+            if let record = record(event.key), [.completed, .cancelled].contains(record.event.lifecycle),
+               workspaceActivityIDs.contains(record.id), !record.isPinned { scheduleRetraction(record.id) }
             scheduleExpiryRefresh()
             reflow()
         } catch { message = error.localizedDescription }
@@ -325,7 +376,7 @@ struct CommandItem: Identifiable {
         case .present(let item): present(item)
         case .queue: resumeAttention(after: max(0.6, (attention.nextEligible() ?? Date()).timeIntervalSinceNow + 0.05))
         case .indicate:
-            illuminate(event.phase.tone)
+            illuminate(event.lifecycle.tone)
             if item.priority.interrupts, !(interaction.presentation == .expanded && route.feature == .activity) {
                 dockBadge = item.priority.tone
             }
@@ -392,6 +443,35 @@ struct CommandItem: Identifiable {
     func toggleDetail(_ id: String) {
         guard case .activity(let detail) = route else { return }
         navigate(.activity(detail: detail == id ? nil : id))
+    }
+    /// A finished task shows its terminal state for a beat, then retracts into History.
+    private func scheduleRetraction(_ id: String) {
+        retractions[id]?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.retractions[id] = nil
+            guard let record = self.record(id), [.completed, .cancelled].contains(record.event.lifecycle), !record.isPinned else { return }
+            if case .activity(id) = self.route { return } // being read: leave it in place
+            self.commit(self.snapshot, animation: Motion.quick, also: {
+                self.workspaceActivityIDs.removeAll { $0 == id }
+                self.historyPulse = UUID()
+            })
+        }
+        retractions[id] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: work)
+    }
+    func togglePin(_ record: ActivityRecord) {
+        queue.setPinned(record.id, !record.isPinned); persistQueue(); reflow()
+    }
+    /// Hides the task from the stack only: it stays in History and the task itself is unaffected.
+    func hideFromStack(_ record: ActivityRecord) {
+        queue.dismiss(record.id); attention.discard(id: record.id); persistQueue()
+        if case .activity(record.id) = route {
+            var next = snapshot; next.route = .activity(detail: nil)
+            commit(next, also: { self.workspaceActivityIDs.removeAll { $0 == record.id } })
+        } else {
+            commit(snapshot, animation: Motion.quick, also: { self.workspaceActivityIDs.removeAll { $0 == record.id } })
+        }
     }
     func snooze(_ record: ActivityRecord) {
         queue.snooze(record.id, until: Date().addingTimeInterval(600))
@@ -570,7 +650,7 @@ struct CommandItem: Identifiable {
         let query = commandQuery.trimmingCharacters(in: .whitespaces).lowercased()
         guard !query.isEmpty else { return items }
         let activities = queue.records.filter { $0.event.title.lowercased().contains(query) }.prefix(4).map { record in
-            CommandItem(id: "rec-\(record.id)", title: record.event.title, symbol: record.event.phase.symbol, hint: record.event.source) { [weak self] in
+            CommandItem(id: "rec-\(record.id)", title: record.event.title, symbol: record.event.lifecycle.symbol, hint: record.event.source) { [weak self] in
                 self?.navigate(.history(detail: record.id))
             }
         }

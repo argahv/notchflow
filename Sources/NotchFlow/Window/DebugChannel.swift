@@ -48,6 +48,9 @@ import AppKit
         case "media": model.preferences.mediaEnabled = argument == "on"
         case "reduceMotion": UserDefaults.standard.set(argument == "on", forKey: "NotchFlowReduceMotion")
         case "quiet": model.preferences.quietMode = argument == "on"
+        case "filter": if let filter = AppModel.ActivityFilter(rawValue: argument) { model.setFilter(filter) }
+        case "hide": if let record = model.record(argument) { model.hideFromStack(record) }
+        case "pinRecord": if let record = model.record(argument) { model.togglePin(record) }
         default: NSLog("NotchFlow debug: unknown command %@", command)
         }
     }
