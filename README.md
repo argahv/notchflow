@@ -34,6 +34,31 @@ inside the camera housing and you can't tell it's there.
 
 <p align="center"><sub>Even on a white menu bar there's no seam, no floating card and no drop shadow. It's one shape.</sub></p>
 
+## Drop anything on the notch
+
+Drag a file, an image, a link or some text toward the top of your screen and the notch notices. It
+brightens as you get close, names what's coming ("3 images", "Report.pdf") and opens a well to drop into.
+Let go, and it takes the drop in and tells you what it kept.
+
+- **Your files stay where they are.** The shelf keeps a reference and never moves or changes the original.
+  Images from a browser and attachments from Mail or Photos have no file of their own, so NotchFlow keeps a
+  copy in its own folder and deletes it with the shelf item.
+- **Links and text** are kept as they are, formatting included.
+- **Drag anything back out** into Finder or another app.
+- Quick Look, Open, Copy, Show in Finder and Remove on each item, and Clear with one undo.
+
+**Notch Actions.** A drop comes with its next step: drop three PDFs and **Merge PDFs** is right there. Every
+action runs on your Mac and says up front what it will do, and anything it creates can be undone. Nothing
+you drop is sent to an AI service or anywhere else.
+
+| You drop | You can |
+|---|---|
+| Images | Extract Text, Remove Background, convert to PNG, JPEG or HEIC, Resize, Compress, Annotate |
+| PDFs | Extract Text, Export as Images, Split Pages, Merge PDFs |
+| Text and code | New Note, Clean Up Spacing, Title Case, Count Words, Detect Language |
+| Links | Open, Copy, Fetch Title (the one action that uses the internet, and only when you pick it) |
+| Audio and video | Details, Convert to M4A, Save a Frame, Compress |
+
 ## Approve Claude Code from the notch
 
 Running Claude Code or Codex in a terminal you can't see? NotchFlow follows each session through the
@@ -49,6 +74,16 @@ you. When it asks for permission, the request appears right at the top of your s
 - If you don't answer, NotchFlow steps aside after a short wait and your terminal's own prompt decides.
 - **Recent steps** and **session details** at a glance; **Open Terminal** brings the right app forward.
 - Your prompts, Claude's replies and tool input never leave the hook. Only the state and tool name do.
+
+**Agent Heartbeat.** Even at rest, a small mark beside the status dots shows what your agents are doing. A
+slow flow means working, three steps lighting in turn means tests are running, an amber hand means one is
+waiting for you, and a check means a turn finished. It moves for a few seconds after something actually
+changes, then holds still. A session that has said nothing for ten minutes shows as quiet, not busy.
+
+**Mission Complete.** When real work finishes, the notch marks it: a seal settles in, a silver sheen
+crosses the lower edge once, and you see the actual result with one next step. Real work means an agent
+turn of two minutes or more, a CI run, a build or deploy, a focus session, or a download of 100 MB or more.
+Several finishes close together become one ("2 tasks finished"), and it never lands while you're typing.
 
 ## Everything that needs you, in one stack
 
@@ -71,6 +106,30 @@ The notch lights along its lower edge, grows just enough to say what happened, a
 you'd do next: **Review** a request, **Join** a call, **Show** a download in Finder, **Open** a failed run.
 It never steals keyboard focus, and it never opens over a note you're typing.
 
+## Screenshots, ready to use
+
+Turn on **Settings › Screenshots** and each new screenshot rises out of the notch with **Copy**, **Extract
+Text**, **Annotate** and **Save to Shelf**. Text is read on your Mac with Vision. Annotate adds arrows,
+boxes, highlights, text, blur and redaction, then saves a new "(annotated)" copy beside the original.
+Redaction blacks out the pixels in the saved copy. NotchFlow only picks up files macOS marked as
+screenshots, and never moves, renames or deletes them. It's off by default.
+
+## A notch that keeps up
+
+**Living Split Island.** When music or a timer is playing while an agent works, hovering the notch shows
+both side by side. Pin the one you care about and it stays. Swipe sideways over a half, or use its chevron,
+to switch to the next agent or download. Requests and failures still take the lead, and each side says why
+it's there.
+
+**Time Travel.** Hold **⌥** and scroll on the notch, or press **⌘Y** in the workspace, to step back
+through finished runs, downloads, shelf items, your latest screenshot and, if the clipboard is on, what you
+copied. Each moment keeps only the actions that still work: **Show in Finder** disappears once a file is
+gone. Nothing new is stored. It's built from what NotchFlow already keeps.
+
+**Sound Island.** Put on AirPods and the notch says "AirPods Pro connected", with volume, mute, a quick
+output switch, and play and next when Music or Spotify is in use. It listens to Core Audio (no permission
+needed) and gets out of the way after five seconds.
+
 ## Small tools, right where you look
 
 <table>
@@ -81,7 +140,7 @@ It never steals keyboard focus, and it never opens over a note you're typing.
 </table>
 
 - **Music**: what's playing in Apple Music or Spotify, with transport controls and a scrubbable timeline.
-- **Shelf**: drag files toward the notch. It opens into a drop target and keeps them one click away.
+- **Shelf**: everything you've dropped on the notch (files, images, links and text) with actions for each.
 - **Clipboard**: opt-in, kept in memory only, and skips password managers and anything that looks like a key.
 - **Meetings**: calls with a Zoom, Meet, Teams, Webex or FaceTime link appear ten minutes early, with **Join**.
 - **Download Center**: browser downloads with their real size so far, then the finished file.
@@ -95,8 +154,10 @@ first; with a browser in front, downloads do. It never opens itself.
 ## Private by design
 
 - No account, no telemetry, no analytics, no server. It makes no network requests unless you add a GitHub
-  repository.
-- Everything that touches your data is **opt-in**: clipboard, downloads, meetings, agent approvals, GitHub.
+  repository or ask for a link's title.
+- Everything that touches your data is **opt-in**: clipboard, downloads, meetings, screenshots, agent
+  approvals, GitHub.
+- What you drop on the notch stays on your Mac. Actions run locally, and nothing is sent to an AI service.
 - macOS permissions are requested only when you turn on the feature that needs them. NotchFlow never needs
   Accessibility or your microphone.
 - History stays on your Mac, in owner-only files. Details: [security and privacy](docs/security/integrations.md).
@@ -129,8 +190,16 @@ cd notchflow && bash Scripts/build.sh
 open build/NotchFlow.app
 ```
 
-That's an unsigned universal build for development. Releases are made with `Scripts/release.sh`; see
-[releasing](docs/RELEASING.md).
+That's an unsigned universal build for development. macOS treats every unsigned build as a new app, so it
+asks again for folder access (Downloads, Desktop) after each rebuild. To keep permissions between builds,
+sign it with any code-signing identity in your keychain (`security find-identity -p codesigning -v` lists
+them):
+
+```bash
+NOTCHFLOW_SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" bash Scripts/build.sh
+```
+
+Releases are made with `Scripts/release.sh`; see [releasing](docs/RELEASING.md).
 
 </details>
 
@@ -144,6 +213,8 @@ files for you. [More on agents](docs/architecture/agent-integrations.md).
 | ⌃⌥Space | Open or close, from anywhere |
 | ⌘1 … ⌘5 | Activity, Music, Shelf, Tools, History |
 | ⌘K | Search and commands |
+| ⌘Y | Time Travel, from the workspace |
+| ⌥ + scroll on the notch | Time Travel, from the resting notch |
 | Esc | Back, then close and return to your app |
 
 Works on Macs without a notch too: it draws one at the top centre of the display you choose.
@@ -166,11 +237,14 @@ Events go to an owner-only local inbox; there's no listening port. See the [even
 
 ## Status
 
-**Developer preview.** NotchFlow is built and tested on a MacBook Air with a notch: 49 Swift and 22 Python
-tests, end-to-end hook checks, and frame-by-frame recordings of its transitions. Some things haven't
-been checked against live services yet, notably a live Claude Code or Codex session with the hooks
-installed, and file drags onto the notch. See the [validation report](docs/obsidian-silver/02-validation.md)
-and [progress](docs/implementation/progress.md).
+**Developer preview.** NotchFlow is built and tested on a MacBook Air with a notch: 109 Swift and 24 Python
+tests, end-to-end hook checks, and frame-by-frame recordings of its transitions. The newest features (the
+portal, screenshots, actions, the agent heartbeat, the split island, Time Travel and the sound island) were
+run on a Debug build through the same code a drop, a screenshot or an output change goes through. Some
+things still need a person at the Mac: real drags from Finder, Safari, Mail and Photos, a real ⇧⌘4
+screenshot, a live Claude Code or Codex session with the hooks installed, AirPods connecting, and the
+trackpad gestures. See the [validation report](docs/obsidian-silver/02-validation.md),
+[living notch progress](docs/implementation/living-notch-progress.md) and [progress](docs/implementation/progress.md).
 
 The screenshots on this page are the real app. They were captured over a neutral wallpaper and menu bar, so
 no personal desktop appears, and they use demo projects.
@@ -186,7 +260,8 @@ python3 -I Tests/test_bridge.py
 ```
 
 - `Sources/NotchCore`: the testable core, covering the activity engine, ranking, geometry, GitHub mapping,
-  context rules and content rules.
+  context rules, content rules, and the rules behind the portal, shelf, screenshots, actions, agent pulse,
+  split island, Time Travel and sound.
 - `Sources/NotchFlow`: the app. `Shell` (surface and layout), `Design` (tokens, silhouette, materials,
   motion), `Surfaces` (features), `Features` (providers and services), `Window` (panel, input, geometry).
 - `Scripts`: the project generator, the event CLI and agent hooks, and build and notarization scripts.
