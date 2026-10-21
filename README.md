@@ -8,6 +8,9 @@ taps you on the shoulder only when something needs you, and disappears back into
   <img src="docs/media/hero.gif" width="720" alt="The notch at rest with three status dots grows into a compact preview, then into a full workspace listing agents, a failed CI run, a build and a download, and retracts back into the notch.">
 </p>
 
+<p align="center"><a href="docs/media/demo.mp4"><b>▶ Watch the 29-second demo</b></a><br>
+<sub>Recorded from the real app (a Debug build) with demo projects: agents, a failing CI run, a Claude Code permission request, the split island and a drop.</sub></p>
+
 <p align="center">
   <img alt="macOS 14.6+" src="https://img.shields.io/badge/macOS-14.6%2B-black?style=flat-square">
   <img alt="Native SwiftUI and AppKit" src="https://img.shields.io/badge/native-SwiftUI%20%2B%20AppKit-black?style=flat-square">
@@ -221,6 +224,11 @@ Download the zip from the [latest release](https://github.com/argahv/notchflow/r
 **NotchFlow** to Applications. It's signed with a Developer ID and notarized by Apple, so it opens like any
 other app. It needs macOS 14.6 or later and runs natively on Apple silicon and Intel. Each release lists a
 SHA-256 checksum.
+
+> [!NOTE]
+> **Release 0.1.0 predates some of this page.** The drop portal and Notch Actions, Screenshots, Agent
+> Heartbeat and Mission Complete, the Living Split Island, Time Travel and the Sound Island landed after it.
+> Until the next release, [build from source](#get-notchflow) to try them.
 
 <details>
 <summary>Build it yourself instead</summary>
