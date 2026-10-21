@@ -377,10 +377,76 @@ struct CommandItem: Identifiable {
 
     private func refreshedHoverChoice(fresh: Bool = false) -> HoverChoice {
         let previewing = interaction.presentation == .preview
+        let candidates = hoverCandidates
+        // A pin lapses when its item ends; it's never kept for something that isn't live.
+        if let pin = hoverPin, !candidates.contains(where: { $0.id == pin }) { hoverPin = nil }
         let situation = HoverPolicy.Situation(hovered: !fresh && previewing && windows?.pointerInside == true,
                                               locked: !fresh && Date() < hoverLockedUntil,
-                                              allowSplit: SurfaceLayout.splitFits(geometry))
-        return HoverPolicy.choose(hoverCandidates, current: fresh ? nil : hoverChoice, situation: situation)
+                                              allowSplit: SurfaceLayout.splitFits(geometry), pinned: hoverPin)
+        return HoverPolicy.choose(candidates, current: fresh ? nil : hoverChoice, situation: situation)
+    }
+
+    // MARK: Living Split Island
+
+    /// The hover item kept on the island, in memory only. Requests and failures still take the lead.
+    @Published private(set) var hoverPin: String?
+    /// The region just clicked, lit for a beat before the surface grows into it.
+    @Published private(set) var splitFocus: String?
+
+    func toggleHoverPin(_ item: HoverItem) {
+        hoverPin = hoverPin == item.id ? nil : item.id
+        lockHover(); reflow()
+    }
+
+    /// Shows the next (or previous) item of the same kind on one side of the island.
+    func cycleHover(_ side: HoverPolicy.Side, step: Int) {
+        let next = HoverPolicy.cycle(hoverCandidates, current: hoverChoice, side: side, step: step)
+        guard !sameHover(next, hoverChoice) else { return }
+        lockHover(3)
+        commit(snapshot, animation: Motion.quick, also: { self.hoverChoice = next })
+    }
+
+    /// From a sideways swipe: the half under the pointer is the side that changes.
+    func cycleHover(leftHalf: Bool, step: Int) {
+        if case .split(let ambient, let work, _) = glanceLead {
+            let item = leftHalf ? ambient : work
+            cycleHover(hoverChoice.primary?.id == item.id ? .primary : .secondary, step: step)
+        } else {
+            cycleHover(.primary, step: step)
+        }
+    }
+
+    func hoverSide(_ item: HoverItem) -> HoverPolicy.Side { hoverChoice.primary?.id == item.id ? .primary : .secondary }
+    /// A live hover item by its id ("music", "timer", or an activity's id).
+    func hoverItem(id: String) -> HoverItem? {
+        hoverCandidates.first { $0.id == id }.flatMap(hoverItem)
+    }
+    func hoverAlternatives(_ item: HoverItem) -> Int {
+        HoverPolicy.alternatives(hoverCandidates, current: hoverChoice, side: hoverSide(item))
+    }
+
+    /// Why an item is on the island, in a few words: the ranking made visible.
+    func hoverReason(_ item: HoverItem) -> String {
+        if hoverPin == item.id { return "Kept shown" }
+        let tier = [hoverChoice.primary, hoverChoice.secondary].compactMap { $0 }.first { $0.id == item.id }?.tier
+        switch tier {
+        case .input?: return "Needs you"
+        case .failure?: return "Failed recently"
+        case .pinned?: return "Pinned"
+        case .imminent?: return item.id == "timer" ? "Timer running" : "Starting soon"
+        case .foreground?: return "Related to the app in front"
+        case .running?: return "Running"
+        case .music?: return "Playing"
+        case .general?, nil: return "Live"
+        }
+    }
+
+    /// Clicking a region: it lights for a beat, the other fades, then the surface grows into it.
+    func openSplitRegion(_ item: HoverItem) {
+        splitFocus = item.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + (Motion.reduced ? 0 : 0.12)) { [weak self] in
+            self?.openHoverItem(item); self?.splitFocus = nil
+        }
     }
 
     /// Same items in the same places: a refresh that changes nothing visible commits nothing.

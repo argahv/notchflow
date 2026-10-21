@@ -268,3 +268,31 @@ exposes to apps behind a separate permission, so quiet mode is the switch.
 **Privacy and performance.** Nothing new is collected: pulses come from states the hooks already sent, the
 tests label is a yes or no, and typing is the time since the last key press. No polling: the band wakes
 once when an afterglow or a staleness limit is reached, and animates only within eight seconds of a change.
+
+Commit: `2709197`.
+
+## Phase 5 — Living Split Island
+
+**What changed.** `HoverPolicy` keeps its ranking and stability rules and gains two things. *Pinning*: one
+item can be kept on the island (pin on hover, or the VoiceOver action). A pinned ambient item (music, a
+timer) stays beside the most important work it pairs with; a pinned work item leads with the best ambient
+item beside it. A request or a failure still takes the lead, with the pin beside it only if they pair. A pin
+lapses when its item ends. *Cycling*: a side can switch to the next item of its own kind that still pairs
+with the other side, by a deliberate sideways trackpad swipe over that half (vertical scrolling is never
+taken), a chevron shown on hover when there's somewhere to go, or VoiceOver's Show next and Show previous.
+Clicking a region lights it for a beat while the other half fades, then the surface grows into its
+destination. Each region's help and accessibility hint say why it's there ("Needs you", "Kept shown",
+"Related to the app in front", "Playing").
+
+**Files.** `NotchCore/HoverPolicy.swift`, `Tests/NotchCoreTests/SplitIslandTests.swift` (new),
+`AppModel.swift`, `Shell/OverlayView.swift`, `Window/WindowManager.swift`, `Window/DebugChannel.swift`.
+
+**Tested.** 103 Swift tests (4 new: pin beside the lead, pin yielding to requests and lapsing, cycling
+within a kind while keeping the pairing, single-item cycling). On a Debug build with two working agents
+(through the real bridge) and playing music: the island paired the newest agent with the music; Next
+switched agents; a timer starting didn't reshuffle the preview under the pointer; pinning music kept it;
+a permission request made that agent lead with the pinned music beside it; when the music stopped, the pin
+lapsed and the timer took the ambient half. Existing hover tests pass unchanged.
+
+**Unverified.** The sideways swipe and the click emphasis on screen (driven through the same calls by the
+debug channel, not by a trackpad).

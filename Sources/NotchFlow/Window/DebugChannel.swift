@@ -103,6 +103,15 @@ import AppKit
             // "pasteboard:<name>": a named pasteboard another process filled, read exactly as a drop is.
             guard !argument.isEmpty else { break }
             _ = model.receiveDrop(NSPasteboard(name: NSPasteboard.Name(argument)), sequence: Int.random(in: 1...Int.max))
+        case "split":
+            // "split:next:primary|secondary", "split:prev:…", "split:pin:<hover id>" (music, timer, or an activity id).
+            let parts = argument.split(separator: ":", maxSplits: 1).map(String.init)
+            let value = parts.count > 1 ? parts[1] : ""
+            switch parts.first {
+            case "next", "prev": model.cycleHover(value == "secondary" ? .secondary : .primary, step: parts.first == "next" ? 1 : -1)
+            case "pin": if let item = model.hoverItem(id: value) { model.toggleHoverPin(item) }
+            default: break
+            }
         case "screenshots":
             // "screenshots:watch" / "screenshots:stop": the watcher only, without changing the saved setting.
             model.screenshots.configure(enabled: argument == "watch")
@@ -160,7 +169,7 @@ import AppKit
         case "status":
             let lines = model.providers.statuses.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.label)" }
                 + ["route: \(model.route) · \(model.interaction.presentation)",
-                   "hover: \(model.hoverChoice.primary?.id ?? "-") + \(model.hoverChoice.secondary?.id ?? "-") +\(model.hoverChoice.others)",
+                   "hover: \(model.hoverChoice.primary?.id ?? "-") + \(model.hoverChoice.secondary?.id ?? "-") +\(model.hoverChoice.others) · pin: \(model.hoverPin ?? "-")",
                    "context: \(model.contextBoost.map(\.rawValue).sorted().joined(separator: ","))",
                    "portal: \(model.interaction.portal.rawValue) · awareness: \(model.interaction.awareness.rawValue) · shelf: \(model.shelfCount)",
                    "portal result: \(model.portalResult.map { "\($0.title) — \($0.detail)" } ?? "-")",

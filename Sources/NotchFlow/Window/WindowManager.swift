@@ -26,6 +26,7 @@ import Quartz
     var model: AppModel?
     private var tracking: NSTrackingArea?
     private var scrollDistance: CGFloat = 0
+    private var sideways: CGFloat = 0
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func updateTrackingAreas() {
         if let tracking { removeTrackingArea(tracking) }
@@ -35,6 +36,20 @@ import Quartz
     override func mouseEntered(with event: NSEvent) { model?.windows?.cancelDismissal(); model?.hoverBegan() }
     override func mouseExited(with event: NSEvent) { model?.hoverEnded(); model?.windows?.scheduleLeave() }
     override func scrollWheel(with event: NSEvent) {
+        // A deliberate sideways swipe over the preview switches the half under the pointer to the next
+        // item of its kind. Vertical scrolling is never taken for this.
+        if let model, model.interaction.presentation == .preview, event.hasPreciseScrollingDeltas, event.momentumPhase.isEmpty,
+           abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) * 1.5 {
+            if event.phase.contains(.began) { sideways = 0 }
+            sideways += event.scrollingDeltaX
+            if abs(sideways) >= 36 {
+                let point = convert(event.locationInWindow, from: nil)
+                model.cycleHover(leftHalf: point.x < bounds.midX, step: sideways < 0 ? 1 : -1)
+                sideways = 0
+            }
+            return
+        }
+        if event.phase.contains(.ended) || event.phase.contains(.cancelled) { sideways = 0 }
         // Scrolling inside a preview or workspace belongs to the content, not the notch gesture.
         guard let model, model.interaction.presentation == .collapsed else {
             scrollDistance = 0

@@ -474,7 +474,9 @@ private struct CountChip: View {
     }
 }
 
-/// One half of the split island. Hovering highlights just this region; the surface doesn't move.
+/// One half of the split island. Hovering highlights just this region and offers to keep it shown or
+/// to switch it to the next item of its kind (also by swiping sideways over it); the surface doesn't move.
+/// Clicking lights it for a beat while the other half fades, then the surface grows into its destination.
 private struct SplitRegion: View {
     @ObservedObject var model: AppModel
     @ObservedObject var media: MediaService
@@ -483,24 +485,48 @@ private struct SplitRegion: View {
     let others: Int
     @State private var hovering = false
     var body: some View {
-        HStack(spacing: 8) {
-            Button { model.openHoverItem(item) } label: {
+        let focus = model.splitFocus
+        let pinned = model.hoverPin == item.id
+        let alternatives = model.hoverAlternatives(item)
+        HStack(spacing: 6) {
+            Button { model.lockHover(); model.openSplitRegion(item) } label: {
                 HoverItemLabel(model: model, media: media, clock: clock, item: item, compact: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(PressScale())
-            .help("\(HoverText.destination(item)) · ⌃⌥Space opens the workspace")
-            .accessibilityHint("Opens \(HoverText.destination(item))")
+            .help("\(model.hoverReason(item)) · \(HoverText.destination(item)) · ⌃⌥Space opens the workspace")
+            .accessibilityHint("\(model.hoverReason(item)). Opens \(HoverText.destination(item))")
+            if hovering || pinned {
+                Button { model.toggleHoverPin(item) } label: { Image(systemName: pinned ? "pin.fill" : "pin") }
+                    .buttonStyle(IconButtonStyle(size: 22, tint: pinned ? Ink.primary : Ink.secondary))
+                    .help(pinned ? "Stop keeping this shown" : "Keep this shown")
+                    .accessibilityLabel(pinned ? "Stop keeping shown" : "Keep shown")
+                    .transition(.opacity)
+            }
+            if hovering && alternatives > 0 {
+                Button { model.cycleHover(model.hoverSide(item), step: 1) } label: { Image(systemName: "chevron.right") }
+                    .buttonStyle(IconButtonStyle(size: 22, tint: Ink.secondary))
+                    .help("Show the next one · or swipe sideways")
+                    .accessibilityLabel("Show next")
+                    .transition(.opacity)
+            }
             HoverItemTrailing(model: model, media: media, item: item, compact: true)
             if others > 0 { CountChip(model: model, others: others) }
         }
         .padding(.horizontal, 8)
         .frame(maxHeight: .infinity)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Ink.elevated.opacity(hovering ? 0.6 : 0)).padding(.vertical, 8))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Ink.elevated.opacity(focus == item.id ? 0.95 : hovering ? 0.6 : 0)).padding(.vertical, 8))
+        .scaleEffect(focus == item.id && !Motion.reduced ? 1.03 : 1)
+        .opacity(focus != nil && focus != item.id ? 0.35 : 1)
         .onHover { hovering = $0 }
         .animation(Motion.micro, value: hovering)
+        .animation(Motion.micro, value: focus)
         .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        .accessibilityAction(named: "Show next") { model.cycleHover(model.hoverSide(item), step: 1) }
+        .accessibilityAction(named: "Show previous") { model.cycleHover(model.hoverSide(item), step: -1) }
+        .accessibilityAction(named: pinned ? "Stop keeping shown" : "Keep shown") { model.toggleHoverPin(item) }
     }
 }
 
