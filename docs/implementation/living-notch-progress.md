@@ -359,3 +359,56 @@ retracted on its own.
 
 **Unverified.** A real AirPods connection or output switch, and setting volume, mute or output from the
 glance: each would change the development Mac's audio, so they weren't exercised here.
+
+Commit: `3759a1d`.
+
+## Phase 8 — Polish and release validation
+
+**What changed.** A one-time tip under the quick-access shortcuts ("Tip: drop anything on the notch to keep
+it"), gone once dismissed or once something is dropped, never repeated. Settings › Appearance › Calm motion
+reduces NotchFlow's own motion to short fades without changing the system setting (the path every animation
+already honours for Reduce Motion). Screenshot discovery is the Settings status text; actions and the split
+island explain themselves in place (actions in a drop's result, "why shown" on each region).
+
+**Cross-feature rules, all tested.** A drag or a drop's result keeps the surface from passive notifications
+(`PortalTests`); a screenshot or a sound change waits while a drag, an editor, the workspace or another
+glance has the surface and appears afterwards if still recent; passive notifications wait while a screenshot
+preview is up; requests and failures still lead the split island over a pin (`SplitIslandTests`);
+celebrations never land on typing or an open notch and are batched (`AgentPulseTests`); one action runs at a
+time and late results are discarded (`ContentActionTests`).
+
+**Security review.** Every input is treated as untrusted: drags are judged by type before the drop; dropped
+names are reduced to one safe path component before NotchFlow writes anything; only `http`/`https` links with
+a host are kept or opened; text is size-capped and secret-looking text is never used as a label or copied
+anywhere new; agent events keep their existing validation and gain only a yes-or-no test label; the
+screenshot folder is only listed and never modified. Nothing runs a process or a shell; dropped code is never
+executed. Files are written only under NotchFlow's 0700 folders, or beside an original as a new
+"(annotated)" copy written without overwriting. The only new network use is Fetch Title, on request. The
+Debug-only overrides (`NOTCHFLOW_APP_SUPPORT`, `NOTCHFLOW_SCREENSHOT_FOLDER`, the debug channel) are compiled
+out of Release: the Release binary contains none of their strings. No telemetry.
+
+**Performance.** Idle CPU of the final Release build over 2 minutes at rest: 0.01 % mean, 0.2 % peak. Memory,
+measured the same way for both builds 25 seconds after launch on the development Mac:
+
+| Build | Footprint (dirty) | Resident |
+|---|---|---|
+| `main` (`f0f7f58`) | 27 MB | 58.6 MB |
+| `feat/living-notch` | 28 MB | 63.9 MB |
+
+Resident memory includes shared, reclaimable framework pages; the footprint is what counts against memory
+pressure. Long sessions haven't been measured.
+
+**Builds and tests at the end.** 108 Swift tests, 24 Python tests, Debug and universal Release builds; CI was
+green on GitHub's runner at `234b782` and later commits run there too.
+
+## Still to verify by hand
+
+These need a person at the Mac or hardware this run didn't have:
+- A real drag from Finder, Safari, Mail and Photos into the notch, the live absorption, and dragging items out
+  to Finder (check it copies rather than moves on the same volume), Messages, Slack and a browser upload.
+- Quick Look from the shelf, the screenshot preview and Time Travel.
+- A real ⇧⌘3 / ⇧⌘4 screenshot with Screenshots turned on (and the Desktop access prompt).
+- A live Claude Code or Codex session with the hooks installed.
+- AirPods connecting, and changing volume, mute or output from the sound glance.
+- The sideways swipe, ⌥-scroll and ⌘Y on a real trackpad and keyboard.
+- An external display, and a full VoiceOver pass.

@@ -93,6 +93,11 @@ struct QuickApp: Identifiable, Equatable {
     @Published var screenshotsEnabled: Bool { didSet { save("screenshotsEnabled", screenshotsEnabled) } }
     /// The notch briefly shows a new sound output (AirPods connecting, a display's speakers) with its volume.
     @Published var soundIslandEnabled: Bool { didSet { save("soundIslandEnabled", soundIslandEnabled) } }
+    /// The one-time portal tip was dismissed, or a drop has already been made.
+    @Published var portalHintSeen: Bool { didSet { save("portalHintSeen", portalHintSeen) } }
+    /// NotchFlow's own motion reduced to short fades, without changing the system setting. Same switch
+    /// the Reduce Motion path already reads.
+    @Published var calmMotion: Bool { didSet { save("NotchFlowReduceMotion", calmMotion) } }
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -128,6 +133,8 @@ struct QuickApp: Identifiable, Equatable {
         portalEnabled = defaults.bool(forKey: "portalEnabled")
         screenshotsEnabled = defaults.bool(forKey: "screenshotsEnabled")
         soundIslandEnabled = defaults.bool(forKey: "soundIslandEnabled")
+        portalHintSeen = defaults.bool(forKey: "portalHintSeen")
+        calmMotion = defaults.bool(forKey: "NotchFlowReduceMotion")
     }
 
     var modeSettings: ModeSettings {

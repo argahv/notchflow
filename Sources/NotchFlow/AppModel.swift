@@ -1146,6 +1146,8 @@ struct CommandItem: Identifiable {
     func keep(_ incoming: [ShelfIncoming], failures: [String] = []) {
         let result = shelf.intake(incoming, origin: "drop")
         let kept = !result.added.isEmpty || result.duplicates > 0
+        // Someone who has dropped something knows the portal: the one-time tip retires.
+        if kept, !preferences.portalHintSeen { preferences.portalHintSeen = true }
         if interaction.presentation == .expanded {
             var next = snapshot; next.interaction.send(kept ? .absorb : .rejectDrop)
             commit(next, animation: Motion.expressive, also: { self.dropTargeted = false; self.lastArrival = result.added.last })

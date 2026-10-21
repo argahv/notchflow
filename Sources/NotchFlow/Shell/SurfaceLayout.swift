@@ -62,6 +62,8 @@ enum Metrics {
     static let timelineStage = 82.0
     /// Sound Island's glance.
     static let soundGlance = 76.0
+    /// A one-time discovery tip under the quick-access shortcuts.
+    static let hintRow = 18.0
     static let historyRow = 44.0
     static let historyGroup = 24.0
     static let commandRow = 32.0
@@ -129,7 +131,9 @@ enum Metrics {
             // from text), so there is no layout feedback loop and no horizontal jitter.
             switch model.glanceLead {
             case .quickAccess:
-                return resolve(.content(width: display.notchWidth + 2 * Metrics.quickWing, height: Metrics.quickHeight),
+                let hint = model.preferences.portalEnabled && !model.preferences.portalHintSeen
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.quickWing + (hint ? 40 : 0),
+                                        height: Metrics.quickHeight + (hint ? Metrics.hintRow + 6 : 0)),
                                wing: Metrics.quickWing, ear: 8, corner: 18)
             case .split:
                 return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.glanceHeight),

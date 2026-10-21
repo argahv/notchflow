@@ -101,6 +101,10 @@ struct SettingsView: View {
                 Button("Add App…") { addQuickApp() }
             }
             Section("Appearance") {
+                Toggle(isOn: $preferences.calmMotion) {
+                    Text("Calm motion")
+                    Text("Short fades instead of springs, sweeps and pulses, without changing the system's Reduce Motion setting.")
+                }
                 Picker("Surface", selection: $preferences.visualMode) {
                     ForEach(VisualMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }

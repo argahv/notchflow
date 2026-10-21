@@ -537,12 +537,28 @@ private struct SplitRegion: View {
 private struct QuickAccessRow: View {
     @ObservedObject var model: AppModel
     var body: some View {
-        HStack(spacing: 6) {
-            shortcut(.music, "Music", "music.note", 0)
-            shortcut(.shelf, "Shelf", "tray", 1)
-            shortcut(.tools(nil), "Tools", "square.grid.2x2", 2)
+        VStack(spacing: 2) {
+            HStack(spacing: 6) {
+                shortcut(.music, "Music", "music.note", 0)
+                shortcut(.shelf, "Shelf", "tray", 1)
+                shortcut(.tools(nil), "Tools", "square.grid.2x2", 2)
+            }
+            .frame(maxHeight: .infinity)
+            // Shown until dismissed or until the first drop, then never again.
+            if model.preferences.portalEnabled && !model.preferences.portalHintSeen {
+                HStack(spacing: 4) {
+                    Image(systemName: "tray.and.arrow.down").font(.system(size: 9.5, weight: .semibold))
+                    Text("Tip: drop anything on the notch to keep it").font(.system(size: 10.5, weight: .medium))
+                    Spacer(minLength: 2)
+                    Button { model.preferences.portalHintSeen = true } label: { Image(systemName: "xmark") }
+                        .buttonStyle(IconButtonStyle(size: 16, tint: Ink.secondary)).accessibilityLabel("Dismiss tip")
+                }
+                .foregroundStyle(Ink.secondary)
+                .frame(height: Metrics.hintRow)
+                .padding(.bottom, 4)
+                .reveal(.detail)
+            }
         }
-        .frame(maxHeight: .infinity)
     }
     private func shortcut(_ route: Route, _ title: String, _ symbol: String, _ index: Int) -> some View {
         QuickShortcut(title: title, symbol: symbol) { model.navigate(route); model.windows?.focus() }
