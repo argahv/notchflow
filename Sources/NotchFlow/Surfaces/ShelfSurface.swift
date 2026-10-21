@@ -131,6 +131,8 @@ private struct FileTile: View {
         .onTapGesture(count: 2) { if item.kind == .text { model.copyShelfItem(item) } else { service.open(item) } }
         .onDrag { service.itemProvider(for: item) }
         .contextMenu {
+            Button("Actions…") { model.openActions([item.id]) }
+            Divider()
             if item.isFile { Button("Quick Look") { model.quickLook(item) } }
             if item.kind != .text { Button(item.kind == .link ? "Open Link" : "Open") { service.open(item) } }
             Button("Copy") { model.copyShelfItem(item) }

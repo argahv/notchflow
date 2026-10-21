@@ -71,6 +71,8 @@ enum Route: Hashable {
     case command
     /// The latest screenshot, opened from its preview into one of its actions.
     case capture(CaptureMode)
+    /// Actions on what the person dropped or picked from the shelf (the model holds which items).
+    case actions
 
     static func root(_ feature: Feature) -> Route {
         switch feature {
@@ -88,19 +90,24 @@ enum Route: Hashable {
         case .shelf: .shelf
         case .tools: .tools
         case .history: .history
-        case .command, .capture: nil
+        case .command, .capture, .actions: nil
         }
     }
     /// Identity of the content view; sub-routes share their feature's view.
     var surface: String {
-        if case .capture = self { return "capture" }
-        return feature?.rawValue ?? "command"
+        switch self {
+        case .capture: "capture"
+        case .actions: "actions"
+        default: feature?.rawValue ?? "command"
+        }
     }
     var parent: Route? {
         switch self {
         case .activity(.some): .activity(detail: nil)
         case .tools(.some): .tools(nil)
         case .history(.some): .history(detail: nil)
+        // What was acted on lives on the shelf; going back lands there.
+        case .actions: .shelf
         default: nil
         }
     }

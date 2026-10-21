@@ -661,6 +661,7 @@ struct WorkspaceView: View {
                     case .history: HistorySurface(model: model)
                     case .command: CommandSurface(model: model)
                     case .capture(let mode): CaptureSurface(model: model, mode: mode)
+                    case .actions: ActionsSurface(model: model)
                     }
                 }
             }

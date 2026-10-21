@@ -294,6 +294,15 @@ final class ShelfPreview: NSObject, QLPreviewPanelDataSource {
 
     func remove(_ item: ShelfFile) { discard([item]) }
     func clear() { discard(items) }
+    /// Removes what an action just made, files and all. It's NotchFlow's own output, so undoing the
+    /// action leaves nothing behind; only copies are ever deleted, never a reference's original.
+    func discardCreated(_ ids: [UUID]) {
+        for item in items where ids.contains(item.id) {
+            if item.kind == .copy, let path = item.copyPath { Self.deleteCopy(at: Self.folder.appendingPathComponent(path)) }
+            context?.delete(item)
+        }
+        thumbnails.removeAllObjects(); save()
+    }
     func undo() {
         guard !removed.isEmpty else { return }
         removed.forEach { context?.insert($0) }

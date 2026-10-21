@@ -143,3 +143,75 @@ directory-watch pattern, the debug channel.
 folder's listing and one extended attribute are read; screenshots are never moved, renamed or deleted.
 Thumbnails are in memory only. Text recognition runs on device. Annotated copies get a new name and are
 written without overwriting.
+
+Commit: `8a317e7`.
+
+## Phase 3 — Notch Actions
+
+**What changed.**
+- Content is classified locally and deterministically (`ContentClassifier`): files by their type and its
+  supertypes, text as a link, code or prose, and text that looks like a key or password is marked
+  sensitive. `ActionRegistry` orders the actions that fit each kind; each action declares what it does
+  with the data: stays on this Mac, adds a new file to the shelf, or uses the internet.
+- `ActionRun` keeps one action at a time: available, processing (with measured progress, or none),
+  completed or failed. A run that was cancelled or replaced can't overwrite the state when it finishes late.
+  Failures offer Try Again; anything an action created can be undone, which removes its files too.
+- A drop's result now offers its two most useful actions (Merge PDFs when several PDFs arrive together)
+  and More. The shelf's context menu has Actions…. Both open the actions surface in the same silhouette,
+  where every action shows its effect and the result appears in place.
+- What runs, all on this Mac and off the main thread:
+  - Images: Extract Text and Remove Background (Vision), Convert to PNG, JPEG (transparency flattened
+    onto white) or HEIC, Resize to Half, Compress, Annotate (the screenshot editor), Copy.
+  - PDFs (PDFKit): Extract Text, Export as Images, Split Pages (up to 60 pages per run), Merge PDFs.
+  - Text: New Note, Copy, Clean Up Spacing, Title Case, UPPERCASE, lowercase, Count Words.
+    Code: Copy, Detect Language, New Note, Count Words. Secrets: Copy and Count Words only.
+  - Links: Open, Copy, Fetch Title (LinkPresentation; the only action that uses the network, and only
+    when chosen, with a ten-second limit).
+  - Audio and video (AVFoundation): Details, Convert to M4A, Save a Frame, Compress (never kept if it
+    isn't smaller than the original).
+  - Files and folders: Quick Look, Open, Copy, Show in Finder.
+- New files are written into the shelf's own folder and added as copies; originals are never changed.
+
+**Not built, on purpose.** AI actions (summarise, rewrite, translate, explain, code explanation): no AI
+service is configured, and the brief requires explicit configuration and consent first. Code formatting:
+no formatter ships with macOS. GitHub Gists: no account is connected. "Read later" for links: a dropped
+link is already kept on the shelf. Copying selected PDF pages: needs a page picker; Split Pages covers
+taking pages out.
+
+**Reused.** The shelf (items, copies, intake, Quick Look), the screenshot annotation editor and text
+recognition, the portal's result, the surface system, `ClipClassifier`, the debug channel.
+
+**Files.** New: `NotchCore/ContentActions.swift`, `Features/ContentActionRunner.swift`,
+`Surfaces/ActionsSurface.swift`, `Tests/NotchCoreTests/ContentActionTests.swift`. Changed: `AppModel.swift`,
+`Features/ShelfService.swift`, `Shell/PortalView.swift`, `Shell/Route.swift`, `Shell/SurfaceLayout.swift`,
+`Shell/OverlayView.swift`, `Surfaces/ShelfSurface.swift`, `Window/DebugChannel.swift`.
+
+**Tested.**
+- 93 Swift tests (10 new: classification, availability, secrets, collections, effects, the run's states,
+  late results after cancel or replacement, text transforms, language detection) and 23 Python tests.
+- On a Debug build with a throwaway shelf, with system media and generated PDFs:
+  - A photo (Parrot.heic): the drop offered Extract Text and Remove Background; Remove Background kept the
+    bird on a transparent PNG; JPEG conversion flattened onto white; Resize halved it; Compress 26 → 14 KB;
+    Extract Text found no text, as expected.
+  - PDFs: two dropped together offered Merge PDFs, which produced 5 pages from 3 + 2; Export as Images and
+    Split Pages wrote a page folder each; Extract Text returned the exact text of a text PDF, and nothing
+    for one made of pictures.
+  - Audio and video: details (2 s audio; 16 s, 400 × 258, 90 fps video), M4A 475 → 31 KB, a frame saved,
+    and Compress 701 → 539 KB. The first Compress made the file larger; it now picks its setting from the
+    source's size and refuses to keep a larger file.
+  - Text: Clean Up Spacing, Title Case, Count Words, New Note (a real note). A pasted API key was marked
+    sensitive and offered only Copy and Count Words.
+  - Fetch Title for apple.com returned "Apple".
+  - Cancelling a 60-page export at 50, 120 and 200 ms left no files or folders behind; Undo removed an
+    export's folder and files.
+
+**Unverified.** Interaction on screen (all of the above ran through the debug channel and was captured
+offscreen); Quick Look, Open and Show in Finder (they bring other apps forward); Copy (it would replace the
+clipboard); HEIC output on an Intel Mac; very large media.
+
+**Privacy and security.** Nothing is sent anywhere except a page request for Fetch Title, and only when it's
+chosen. Dropped code is never run. No shell commands. Outputs are bounded (60 pages per run, plus the
+shelf's copy limits) and stay in NotchFlow's folder until removed.
+
+**Performance.** Nothing runs until an action is chosen, so idle cost is unchanged. An export polls its
+progress every 200 ms only while it runs.

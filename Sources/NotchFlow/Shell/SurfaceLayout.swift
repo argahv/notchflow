@@ -45,6 +45,19 @@ enum Metrics {
     static let annotateWidth = 700.0
     static let annotateToolbar = 30.0
     static let annotateMaxCanvas = 330.0
+    /// Notch Actions: a drop's result with its actions, the surface's width, the item's line, the
+    /// action grid, and each kind of result.
+    static let resultActionsWing = 190.0
+    static let actionsWidth = 600.0
+    static let actionColumns = 3
+    static let actionContext = 40.0
+    static let actionRow = 30.0
+    static let actionProcessing = 44.0
+    static let actionFailed = 48.0
+    static let actionText = 110.0
+    static let actionDetail = 20.0
+    static let actionCreated = 48.0
+    static let actionNote = 40.0
     static let historyRow = 44.0
     static let historyGroup = 24.0
     static let commandRow = 32.0
@@ -91,8 +104,10 @@ enum Metrics {
                 return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.portalOpening),
                                wing: Metrics.splitWing, ear: 12, corner: 26)
             case .absorbing, .failed:
-                return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing, height: Metrics.portalResult),
-                               wing: Metrics.glanceWing, ear: 10, corner: 22)
+                // A result that offers actions needs room for them beside its title.
+                let wing = (model.portalResult?.actions.isEmpty ?? true) ? Metrics.glanceWing : Metrics.resultActionsWing
+                return resolve(.content(width: display.notchWidth + 2 * wing, height: Metrics.portalResult),
+                               wing: wing, ear: 10, corner: 22)
             }
         }
         switch snapshot.interaction.presentation {
@@ -127,7 +142,9 @@ enum Metrics {
         case .expanded:
             // Annotating needs room for the image; everything else keeps the workspace's width.
             let annotating = snapshot.route == .capture(.annotate)
-            let width = annotating ? annotationWidth(display) : workspaceWidth(display)
+            let width = annotating ? annotationWidth(display)
+                : snapshot.route == .actions ? min(Metrics.actionsWidth, display.width - 2 * SurfaceGeometryEngine.screenMargin)
+                : workspaceWidth(display)
             return resolve(.content(width: width, height: workspaceHeight(snapshot, model), minHeight: 56, maxHeight: annotating ? 540 : 420),
                            wing: Metrics.dockWing, ear: 14, corner: 28)
         }
@@ -195,6 +212,29 @@ enum Metrics {
             let canvas = annotationCanvas(model.geometry, ear: 14, aspect: Double(model.capture?.aspect ?? 1.6))
             return pad + Metrics.header + Metrics.gap + Metrics.annotateToolbar + Metrics.gap + canvas.height
                 + Metrics.gap + Metrics.annotateToolbar + pad
+        case .actions:
+            guard let context = model.actionContext else { return pad + Metrics.emptyRow + pad }
+            let count = ActionRegistry.actions(for: context).count
+            let rows = (count + Metrics.actionColumns - 1) / Metrics.actionColumns
+            var height = pad + Metrics.header + Metrics.gap + Metrics.actionContext + Metrics.gap
+            height += count == 0 ? Metrics.emptyRow : stack(rows, Metrics.actionRow, gap: 6)
+            return height + actionResultHeight(model.actionRun.phase) + pad
+        }
+    }
+
+    static func actionResultHeight(_ phase: ActionRun.Phase) -> Double {
+        switch phase {
+        case .available: return 0
+        case .processing: return Metrics.gap + Metrics.actionProcessing
+        case .failed: return Metrics.gap + Metrics.actionFailed
+        case .completed(_, let outcome):
+            switch outcome {
+            case .text(let text) where text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty: return Metrics.gap + Metrics.actionNote
+            case .text: return Metrics.gap + Metrics.actionText + 6 + 26
+            case .details(let details): return Metrics.gap + Double(details.count) * (Metrics.actionDetail + 4) + 12
+            case .created: return Metrics.gap + Metrics.actionCreated
+            case .done: return Metrics.gap + Metrics.actionNote
+            }
         }
     }
 

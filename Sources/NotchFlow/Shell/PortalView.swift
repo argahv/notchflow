@@ -153,7 +153,23 @@ private struct PortalResultView: View {
                 ToneGlyph(symbol: result.kept ? "checkmark" : "exclamationmark.triangle.fill", tone: result.kept ? .green : .amber, size: 28)
                 PortalText(title: result.title, detail: result.detail)
                 Spacer(minLength: 8)
-                if result.kept {
+                if result.kept && !result.actions.isEmpty {
+                    // The most useful things to do with what was just dropped, right here; the rest
+                    // open in the same surface.
+                    HStack(spacing: 6) {
+                        ForEach(result.actions, id: \.self) { action in
+                            Button(action.title) { model.openActions(result.items, then: action) }
+                                .buttonStyle(PillButtonStyle(prominent: action == result.actions.first))
+                                .fixedSize()
+                                .help(action.effectHelp)
+                        }
+                        if result.items.count == 1 {
+                            Button { model.openActions(result.items) } label: { Image(systemName: "ellipsis") }
+                                .buttonStyle(IconButtonStyle(size: 26, tint: Ink.secondary))
+                                .help("More actions").accessibilityLabel("More actions")
+                        }
+                    }
+                } else if result.kept {
                     Button("Open") { model.navigate(.shelf); model.windows?.focus() }
                         .buttonStyle(PillButtonStyle())
                         .help("Open the shelf · ⌘3")

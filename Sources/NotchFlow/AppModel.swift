@@ -858,6 +858,9 @@ struct CommandItem: Identifiable {
         let title: String
         let detail: String
         let previews: [PortalPreview]
+        /// The shelf items this drop added, and the actions offered for them right here.
+        var items: [UUID] = []
+        var actions: [ContentAction] = []
     }
     struct PortalPreview: Identifiable, Equatable { let id: UUID; let icon: NSImage?; let symbol: String }
     private var portalWork: DispatchWorkItem?
@@ -945,8 +948,13 @@ struct CommandItem: Identifiable {
         let detail = added.isEmpty ? "Already on your shelf"
             : skipped > 0 ? "Kept \(added.count) of \(added.count + skipped) · on your shelf"
             : "Kept on your shelf · \(all.count) \(all.count == 1 ? "item" : "items")"
+        // What can be done with it, offered in the result itself: the item's two most useful actions,
+        // or Merge PDFs for several PDFs dropped together.
+        let contexts = added.map { ContentInspector.context(for: $0, shelf: shelf) }
+        let actions = contexts.count == 1 ? ActionRegistry.primary(for: contexts[0])
+            : ActionRegistry.actions(for: ContentClassifier.collection(contexts.map(\.kind), title: ""))
         let summary = PortalResult(kept: true, title: cargo?.title ?? portalCargo?.title ?? "Shelf", detail: detail,
-                                   previews: added.prefix(3).map(portalPreview))
+                                   previews: added.prefix(3).map(portalPreview), items: added.map(\.id), actions: actions)
         var next = snapshot; next.interaction.send(.absorb)
         commit(next, also: {
             self.dropTargeted = false; self.lastArrival = result.added.last
@@ -954,7 +962,8 @@ struct CommandItem: Identifiable {
             if !added.isEmpty { self.portalPulse = summary.id }
         })
         illuminate(.silver)
-        schedulePortalSettle(after: 1.6)
+        // Long enough to reach for an action; the pointer resting on the result keeps it longer.
+        schedulePortalSettle(after: actions.isEmpty ? 1.6 : 4.5)
     }
 
     private func reject(_ message: String) {
@@ -1012,6 +1021,174 @@ struct CommandItem: Identifiable {
     func quickLook(_ item: ShelfFile) {
         guard shelf.prepareQuickLook(item) else { return }
         windows?.showQuickLook()
+    }
+
+    // MARK: Notch Actions
+
+    /// What the action surface is about: one shelf item, or several dropped together.
+    @Published private(set) var actionItemIDs: [UUID] = []
+    /// Worked out once when the surface opens, so views never touch the disk to draw it.
+    @Published private(set) var actionContext: ContentContext?
+    @Published private(set) var actionRun = ActionRun()
+    /// Shelf items the last action made; Undo removes them and their files.
+    @Published private(set) var actionCreated: [UUID] = []
+    private var actionTask: Task<Void, Never>?
+
+    var actionItems: [ShelfFile] {
+        let all = shelf.items
+        return actionItemIDs.compactMap { id in all.first { $0.id == id } }
+    }
+
+    /// Opens the actions for shelf items in the same surface, optionally starting one straight away.
+    func openActions(_ ids: [UUID], then action: ContentAction? = nil) {
+        if ids != actionItemIDs { actionTask?.cancel(); actionTask = nil; actionRun = ActionRun(); actionCreated = [] }
+        actionItemIDs = ids
+        let items = actionItems
+        if items.count == 1 {
+            actionContext = ContentInspector.context(for: items[0], shelf: shelf)
+        } else if items.count > 1 {
+            let kinds = items.map { ContentInspector.context(for: $0, shelf: shelf).kind }
+            actionContext = ContentClassifier.collection(kinds, title: "\(items.count) items")
+        } else {
+            actionContext = nil
+        }
+        portalWork?.cancel()
+        var next = snapshot; next.interaction.send(.expand); next.route = .actions
+        commit(next, also: { self.portalResult = nil; if case .capture = self.glance { self.glance = .summary } })
+        windows?.focus()
+        if let action { perform(action) }
+    }
+
+    func perform(_ action: ContentAction) {
+        let items = actionItems
+        guard let first = items.first, let context = actionContext, ActionRegistry.actions(for: context).contains(action) else { return }
+        // Opening something elsewhere isn't a run with a result.
+        switch action {
+        case .quickLook: quickLook(first); return
+        case .open: shelf.open(first); return
+        case .reveal: shelf.reveal(first); return
+        case .annotate: annotateFile(first); return
+        default: break
+        }
+        guard let token = actionRun.start(action) else { return }
+        actionCreated = []
+        let text = textContent(of: first)
+        switch action {
+        case .copy:
+            shelf.copyToPasteboard(first)
+            actionRun.finish(.done("Copied to the clipboard"), token: token); reflow(); return
+        case .createNote:
+            guard let text, !context.sensitive, let store = self.context else {
+                actionRun.fail("There's no text to keep as a note.", token: token); reflow(); return
+            }
+            store.insert(Note(text: text)); save()
+            actionRun.finish(.done("Saved as a note in Tools › Notes"), token: token); reflow(); return
+        default: break
+        }
+        reflow()
+        let urls = items.compactMap { shelf.resolve($0) }
+        let link = first.linkURL
+        actionTask = Task { [weak self] in
+            do {
+                let output = try await Self.execute(action, kind: context.kind, urls: urls, link: link, text: text) { value in
+                    Task { @MainActor in self?.actionRun.progress(value, token: token) }
+                }
+                self?.finishAction(output, token: token)
+            } catch is CancellationError {
+            } catch {
+                guard let self else { return }
+                self.actionRun.fail(error.localizedDescription, token: token); self.reflow()
+            }
+        }
+    }
+
+    private nonisolated static func execute(_ action: ContentAction, kind: ContentKind, urls: [URL], link: URL?, text: String?,
+                                            progress: @escaping ActionExecutor.Progress) async throws -> ActionExecutor.Output {
+        switch action {
+        case .mergePDFs:
+            return try await ActionExecutor.merge(urls, progress: progress)
+        case .linkPreview:
+            guard let link else { throw ActionExecutor.Failure.unsupported }
+            return try await ActionExecutor.linkTitle(link)
+        case .pdfText, .exportPages, .splitPages:
+            guard let url = urls.first else { throw ActionExecutor.Failure.unreadable }
+            return try await ActionExecutor.pdf(action, url: url, progress: progress)
+        case .mediaInfo, .extractFrame, .convertM4A, .compressVideo:
+            guard let url = urls.first else { throw ActionExecutor.Failure.unreadable }
+            return try await ActionExecutor.media(action, url: url, progress: progress)
+        case .extractText, .removeBackground, .convertPNG, .convertJPEG, .convertHEIC, .resizeHalf, .compress:
+            guard let url = urls.first else { throw ActionExecutor.Failure.unreadable }
+            return try await ActionExecutor.image(action, url: url)
+        case .uppercase, .lowercase, .titleCase, .cleanWhitespace, .wordCount, .detectLanguage:
+            guard let text else { throw ActionExecutor.Failure.noText }
+            return try ActionExecutor.text(action, text)
+        default:
+            throw ActionExecutor.Failure.unsupported
+        }
+    }
+
+    /// New files join the shelf as copies; a run that was cancelled or replaced meanwhile leaves nothing.
+    private func finishAction(_ output: ActionExecutor.Output, token: Int) {
+        guard actionRun.token == token, actionRun.isProcessing else { output.files.forEach(ShelfService.deleteCopy); return }
+        if !output.files.isEmpty {
+            let result = shelf.intake(output.files.map(ShelfIncoming.copy), origin: "action")
+            actionCreated = result.added
+            guard !result.added.isEmpty else {
+                actionRun.fail(result.message ?? "The result couldn't be added to the shelf.", token: token); reflow(); return
+            }
+        }
+        actionRun.finish(output.outcome, token: token)
+        illuminate(.green)
+        reflow()
+    }
+
+    func cancelAction() { actionTask?.cancel(); actionTask = nil; actionRun.cancel(); reflow() }
+    func dismissActionResult() { actionRun.reset(); actionCreated = []; reflow() }
+
+    /// Removes what the last action created, files and all.
+    func undoAction() {
+        shelf.discardCreated(actionCreated)
+        actionCreated = []; actionRun.reset(); reflow()
+    }
+
+    func copyActionText() {
+        guard case .completed(_, .text(let text)) = actionRun.phase, !text.isEmpty else { return }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+        illuminate(.silver)
+    }
+
+    func keepActionText(asNote: Bool) {
+        guard case .completed(_, .text(let text)) = actionRun.phase, !text.isEmpty else { return }
+        if asNote, let context {
+            context.insert(Note(text: text)); save()
+        } else {
+            let result = shelf.intake([.text(text, rich: nil)], origin: "action")
+            if result.added.isEmpty && result.duplicates == 0 { message = result.message; return }
+        }
+        illuminate(.green)
+    }
+
+    /// The text an item holds: its own text, or a small text file's contents.
+    private func textContent(of item: ShelfFile) -> String? {
+        switch item.kind {
+        case .text: item.text
+        case .link: item.text
+        case .reference, .copy: shelf.resolve(item).flatMap(ContentInspector.text(of:))
+        }
+    }
+
+    /// Opens an image file in the annotation editor used for screenshots.
+    private func annotateFile(_ item: ShelfFile) {
+        guard let url = shelf.resolve(item) else { message = "That file is no longer available."; return }
+        Task { [weak self] in
+            let described = await Task.detached(priority: .userInitiated) { ScreenshotService.describe(url) }.value
+            guard let self, let described else { self?.message = "That image couldn't be read."; return }
+            self.recognition?.cancel()
+            self.capture = Capture(url: url, taken: item.addedAt, pixelSize: described.size,
+                                   thumbnail: described.thumbnail.map { NSImage(cgImage: $0, size: .zero) })
+            self.captureText = .idle; self.annotatedCopy = nil; self.annotations = AnnotationDocument()
+            self.annotateCapture()
+        }
     }
 
     // MARK: Screenshot Magnet
@@ -1181,7 +1358,13 @@ struct CommandItem: Identifiable {
             guard let self else { return }
             self.captureBusy = false
             switch saved {
-            case .success(let copy): self.annotatedCopy = copy; self.illuminate(.green)
+            case .success(let copy):
+                self.annotatedCopy = copy; self.illuminate(.green)
+                // Annotating a shelf copy saves beside it, inside the shelf's folder: it joins the shelf
+                // rather than being swept as an orphan at the next launch.
+                if copy.standardizedFileURL.path.hasPrefix(ShelfService.folder.standardizedFileURL.path + "/") {
+                    self.shelf.intake([.copy(copy)], origin: "action")
+                }
             case .failure(let error): self.message = error.localizedDescription
             }
             self.reflow()

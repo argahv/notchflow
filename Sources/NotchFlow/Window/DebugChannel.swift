@@ -131,6 +131,20 @@ import AppKit
                                       text: parts.count > 2 ? parts[2] : nil)
                 model.changeAnnotations { $0.add(item) }
             }
+        case "actions":
+            // "actions:<item name prefix>[:<action>]", or "actions:pdfs:mergePDFs" for every PDF on the shelf;
+            // "actions:cancel", "actions:undo".
+            let parts = argument.split(separator: ":").map(String.init)
+            switch parts.first {
+            case "cancel": model.cancelAction()
+            case "undo": model.undoAction()
+            case "pdfs":
+                let ids = model.shelf.items.filter { $0.name.lowercased().hasSuffix(".pdf") }.map(\.id)
+                model.openActions(ids, then: parts.count > 1 ? ContentAction(rawValue: parts[1]) : nil)
+            default:
+                guard let prefix = parts.first, let item = model.shelf.items.first(where: { $0.name.hasPrefix(prefix) }) else { break }
+                model.openActions([item.id], then: parts.count > 1 ? ContentAction(rawValue: parts[1]) : nil)
+            }
         case "shelf":
             switch argument {
             case "clear": model.clearShelf()
@@ -153,6 +167,9 @@ import AppKit
                    "screenshots: \(model.screenshots.status)",
                    "capture: \(model.capture.map { "\($0.id.uuidString.prefix(8)) \($0.name) \(Int($0.pixelSize.width))x\(Int($0.pixelSize.height))" } ?? "-") · glance: \(model.glance)",
                    "capture text: \(model.captureText)",
+                   "action context: \(model.actionContext.map { "\($0.kind.rawValue) \($0.title) pages=\($0.pageCount.map(String.init) ?? "-") sensitive=\($0.sensitive)" } ?? "-")",
+                   "action: \(model.actionRun.phase) · created: \(model.actionCreated.count)",
+                   "portal actions: \(model.portalResult?.actions.map(\.rawValue).joined(separator: ",") ?? "-")",
                    "annotations: \(model.annotations.items.map(\.tool.rawValue).joined(separator: ",")) · saved: \(model.annotatedCopy?.lastPathComponent ?? "-")",
                    "mode: \(model.preferences.mode?.title ?? "Custom")"]
             try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)
