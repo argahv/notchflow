@@ -104,7 +104,8 @@ private struct ActionButton: View {
         Button(action: run) {
             HStack(spacing: 7) {
                 Image(systemName: action.symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.silver).frame(width: 16)
-                Text(action.title).font(.system(size: 12, weight: .medium)).foregroundStyle(Ink.primary).lineLimit(1)
+                Text(action.title).font(.system(size: 12, weight: .medium)).foregroundStyle(Ink.primary)
+                    .lineLimit(1).minimumScaleFactor(0.85)
                 Spacer(minLength: 2)
                 if let mark = action.effectMark {
                     Image(systemName: mark).font(.system(size: 9.5, weight: .semibold)).foregroundStyle(Ink.secondary)

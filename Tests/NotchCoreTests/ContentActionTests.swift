@@ -45,9 +45,17 @@ final class ContentActionTests: XCTestCase {
     }
 
     func testCollectionsOfferMergeOnlyForSeveralPDFs() {
-        XCTAssertEqual(ActionRegistry.actions(for: ContentClassifier.collection([.pdf, .pdf, .pdf], title: "3 PDFs")), [.mergePDFs])
-        XCTAssertTrue(ActionRegistry.actions(for: ContentClassifier.collection([.pdf, .image], title: "2 files")).isEmpty)
-        XCTAssertTrue(ActionRegistry.actions(for: ContentClassifier.collection([.pdf], title: "1 PDF")).isEmpty)
+        XCTAssertEqual(ActionRegistry.actions(for: ContentClassifier.collection([.pdf, .pdf, .pdf])), [.mergePDFs])
+        XCTAssertTrue(ActionRegistry.actions(for: ContentClassifier.collection([.pdf, .image])).isEmpty)
+        XCTAssertTrue(ActionRegistry.actions(for: ContentClassifier.collection([.pdf])).isEmpty)
+    }
+
+    func testCollectionsAreNamedForWhatTheyHold() {
+        XCTAssertEqual(ContentClassifier.collection([.pdf, .pdf]).title, "2 PDFs")
+        XCTAssertEqual(ContentClassifier.collection([.image, .image, .image]).title, "3 images")
+        XCTAssertEqual(ContentClassifier.collection([.pdf, .image, .folder]).title, "3 files", "files of different kinds")
+        XCTAssertEqual(ContentClassifier.collection([.pdf, .link]).title, "2 items", "anything else together")
+        XCTAssertEqual(ContentClassifier.collection([.link, .link]).title, "2 links")
     }
 
     func testEffectsSayWhatHappensToTheData() {

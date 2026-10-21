@@ -107,9 +107,31 @@ public enum ContentClassifier {
         return ClipClassifier.kind(of: text) == .code ? .code : .text
     }
 
-    /// Several items at once.
-    public static func collection(_ members: [ContentKind], title: String) -> ContentContext {
-        ContentContext(kind: .collection, title: title, members: members)
+    /// Several items at once, named for what they are: "2 PDFs", "3 images", "2 files" for files of
+    /// different kinds, "4 items" for anything else together.
+    public static func collection(_ members: [ContentKind]) -> ContentContext {
+        ContentContext(kind: .collection, title: collectionTitle(members), members: members)
+    }
+
+    static func collectionTitle(_ members: [ContentKind]) -> String {
+        let count = members.count
+        guard count > 1, let first = members.first else { return count == 1 ? "1 item" : "Nothing" }
+        if members.allSatisfy({ $0 == first }) {
+            switch first {
+            case .image: return "\(count) images"
+            case .pdf: return "\(count) PDFs"
+            case .text: return "\(count) text clippings"
+            case .code: return "\(count) code snippets"
+            case .link: return "\(count) links"
+            case .audio: return "\(count) audio files"
+            case .video: return "\(count) videos"
+            case .folder: return "\(count) folders"
+            case .file: return "\(count) files"
+            case .collection: return "\(count) items"
+            }
+        }
+        let fileLike: Set<ContentKind> = [.image, .pdf, .audio, .video, .folder, .file]
+        return members.allSatisfy(fileLike.contains) ? "\(count) files" : "\(count) items"
     }
 }
 

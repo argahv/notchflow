@@ -110,7 +110,7 @@ private struct FileTile: View {
             Text(item.name).font(.system(size: 10.5, weight: .medium)).foregroundStyle(Ink.primary)
                 .lineLimit(2).multilineTextAlignment(.center).truncationMode(.middle)
                 .frame(height: 26, alignment: .top)
-            Text(meta).font(.system(size: 9.5, weight: .medium)).monospacedDigit().foregroundStyle(Ink.secondary)
+            Text(detail ?? added).font(.system(size: 9.5, weight: .medium)).monospacedDigit().foregroundStyle(Ink.secondary)
                 .lineLimit(1).truncationMode(.middle).frame(height: 12)
         }
         .frame(maxWidth: .infinity).frame(height: Metrics.fileTile)
@@ -166,9 +166,10 @@ private struct FileTile: View {
         }
     }
 
-    /// Size (or host, or word count) and when it was added: a time today, a date before.
-    private var meta: String {
-        let detail: String? = switch item.kind {
+    /// Size (or host, or word count). A tile has room for this or the time added, not both; VoiceOver
+    /// reads both, and the tooltip says when it was added.
+    private var detail: String? {
+        switch item.kind {
         case .link: item.linkURL?.host
         case .text: item.text.map { text in
             let words = text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
@@ -178,11 +179,14 @@ private struct FileTile: View {
             item.byteCount.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) }
                 ?? (item.contentType == UTType.folder.identifier ? "Folder" : nil)
         }
-        let added = Calendar.current.isDateInToday(item.addedAt)
+    }
+    /// When it was added: a time today, a date before.
+    private var added: String {
+        Calendar.current.isDateInToday(item.addedAt)
             ? item.addedAt.formatted(date: .omitted, time: .shortened)
             : item.addedAt.formatted(.dateTime.month(.abbreviated).day())
-        return [detail, added].compactMap { $0 }.joined(separator: " · ")
     }
+    private var meta: String { [detail, added].compactMap { $0 }.joined(separator: " · ") }
 
     private var help: String {
         let kind = switch item.kind {

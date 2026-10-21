@@ -470,8 +470,11 @@ struct CommandItem: Identifiable {
             TimelineEntry(id: "s:" + $0.id.uuidString, date: $0.addedAt, kind: .shelf, title: $0.name,
                           detail: $0.origin == "screenshot" ? "Screenshot on your shelf" : "Kept on your shelf")
         }
-        let screenshot = capture.map { [TimelineEntry(id: "p:" + $0.url.path, date: $0.taken, kind: .screenshot, title: $0.name,
-                                                       detail: CaptureWording.meta($0))] } ?? []
+        // The card shows its own time, so the detail is only the screenshot's pixel size.
+        let screenshot: [TimelineEntry] = capture.map { shot -> [TimelineEntry] in
+            let size = shot.pixelSize.width > 0 ? " · \(Int(shot.pixelSize.width)) × \(Int(shot.pixelSize.height))" : ""
+            return [TimelineEntry(id: "p:" + shot.url.path, date: shot.taken, kind: .screenshot, title: shot.name, detail: "Screenshot" + size)]
+        } ?? []
         // Clipboard text only when that feature is on, and never with private details hidden. Secrets are
         // never in it to begin with.
         let clips = preferences.clipboardEnabled && !preferences.privacy ? clipboard.items.map {
@@ -1177,7 +1180,7 @@ struct CommandItem: Identifiable {
         // or Merge PDFs for several PDFs dropped together.
         let contexts = added.map { ContentInspector.context(for: $0, shelf: shelf) }
         let actions = contexts.count == 1 ? ActionRegistry.primary(for: contexts[0])
-            : ActionRegistry.actions(for: ContentClassifier.collection(contexts.map(\.kind), title: ""))
+            : ActionRegistry.actions(for: ContentClassifier.collection(contexts.map(\.kind)))
         let summary = PortalResult(kept: true, title: cargo?.title ?? portalCargo?.title ?? "Shelf", detail: detail,
                                    previews: added.prefix(3).map(portalPreview), items: added.map(\.id), actions: actions)
         var next = snapshot; next.interaction.send(.absorb)
@@ -1368,7 +1371,7 @@ struct CommandItem: Identifiable {
             actionContext = ContentInspector.context(for: items[0], shelf: shelf)
         } else if items.count > 1 {
             let kinds = items.map { ContentInspector.context(for: $0, shelf: shelf).kind }
-            actionContext = ContentClassifier.collection(kinds, title: "\(items.count) items")
+            actionContext = ContentClassifier.collection(kinds)
         } else {
             actionContext = nil
         }
