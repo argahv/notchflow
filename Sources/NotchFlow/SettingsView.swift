@@ -151,6 +151,13 @@ struct SettingsView: View {
                     }
                 }
             }
+            Section("Screenshots") {
+                Toggle(isOn: $preferences.screenshotsEnabled) {
+                    Text("Show new screenshots in the notch")
+                    Text("Copy, read the text or annotate a screenshot right after taking it. NotchFlow watches the folder macOS saves screenshots to, never moves or deletes them, and reads text on this Mac.")
+                }
+                if preferences.screenshotsEnabled { ScreenshotStatus(service: model.screenshots) }
+            }
             Section("Agents") {
                 Toggle(isOn: $preferences.agentApprovals) {
                     Text("Answer permission requests from the notch")
@@ -312,5 +319,35 @@ enum GitHubSettings {
         guard parts.count == 2 else { return nil }
         let candidate = parts.joined(separator: "/")
         return GitHubRuns.isRepository(candidate) ? candidate : nil
+    }
+}
+
+/// Where Screenshot Magnet is looking, and what to do when it can't.
+private struct ScreenshotStatus: View {
+    @ObservedObject var service: ScreenshotService
+    var body: some View {
+        switch service.status {
+        case .off:
+            EmptyView()
+        case .watching(let folder):
+            Text("Watching \(Self.short(folder)). "
+                 + (ScreenshotService.showsFloatingThumbnail
+                    ? "macOS saves a screenshot once its floating thumbnail goes away (about five seconds); turn the thumbnail off in the Screenshot app's Options to see it sooner."
+                    : "Screenshots appear as soon as macOS saves them."))
+                .font(.caption).foregroundStyle(.secondary)
+        case .notFiles:
+            Text("Your screenshots go to the clipboard or an app rather than a file, so there's nothing to watch. In the Screenshot app, choose Options › Save to › a folder.")
+                .font(.caption).foregroundStyle(.secondary)
+        case .unavailable(let folder):
+            HStack {
+                Text("NotchFlow can't read \(Self.short(folder)). Allow it in System Settings › Privacy & Security › Files and Folders.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Try Again") { service.configure(enabled: true) }
+            }
+        }
+    }
+    static func short(_ folder: URL) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return folder.path.hasPrefix(home) ? "~" + folder.path.dropFirst(home.count) : folder.path
     }
 }

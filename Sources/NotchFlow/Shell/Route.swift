@@ -57,6 +57,9 @@ enum Tool: String, CaseIterable, Identifiable {
     }
 }
 
+/// What a screenshot's surface is doing after its preview: reading its text, or annotating it.
+enum CaptureMode: Hashable { case text, annotate }
+
 /// Where the workspace is. Sub-routes stay inside their feature's view so they animate in place;
 /// switching features replaces the content while the surface morphs between their sizes.
 enum Route: Hashable {
@@ -66,6 +69,8 @@ enum Route: Hashable {
     case tools(Tool?)
     case history(detail: String?)
     case command
+    /// The latest screenshot, opened from its preview into one of its actions.
+    case capture(CaptureMode)
 
     static func root(_ feature: Feature) -> Route {
         switch feature {
@@ -83,11 +88,14 @@ enum Route: Hashable {
         case .shelf: .shelf
         case .tools: .tools
         case .history: .history
-        case .command: nil
+        case .command, .capture: nil
         }
     }
     /// Identity of the content view; sub-routes share their feature's view.
-    var surface: String { feature?.rawValue ?? "command" }
+    var surface: String {
+        if case .capture = self { return "capture" }
+        return feature?.rawValue ?? "command"
+    }
     var parent: Route? {
         switch self {
         case .activity(.some): .activity(detail: nil)
@@ -102,6 +110,8 @@ enum Route: Hashable {
 enum GlanceSubject: Equatable {
     case summary
     case notification(String)
+    /// A screenshot that just arrived.
+    case capture(UUID)
 }
 
 /// The drawn silhouette. Size, ears and corners animate together in one transaction.

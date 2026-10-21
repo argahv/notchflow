@@ -103,6 +103,34 @@ import AppKit
             // "pasteboard:<name>": a named pasteboard another process filled, read exactly as a drop is.
             guard !argument.isEmpty else { break }
             _ = model.receiveDrop(NSPasteboard(name: NSPasteboard.Name(argument)), sequence: Int.random(in: 1...Int.max))
+        case "screenshots":
+            // "screenshots:watch" / "screenshots:stop": the watcher only, without changing the saved setting.
+            model.screenshots.configure(enabled: argument == "watch")
+        case "capture":
+            // "capture:<path>" (as if that file were just detected), "capture:text", "capture:annotate",
+            // "capture:dismiss".
+            switch argument {
+            case "text": model.readCaptureText()
+            case "annotate": model.annotateCapture()
+            case "dismiss": model.dismissCapture()
+            default: if argument.hasPrefix("/") { model.screenshots.deliver(URL(fileURLWithPath: argument), taken: Date()) }
+            }
+        case "annotate":
+            // "annotate:<tool>:x1,y1,x2,y2[:text]" with fractions of the image, or undo, redo, clear, save.
+            let parts = argument.split(separator: ":", maxSplits: 2).map(String.init)
+            switch parts.first {
+            case "undo": model.changeAnnotations { $0.undo() }
+            case "redo": model.changeAnnotations { $0.redo() }
+            case "clear": model.changeAnnotations { $0.clear() }
+            case "save": model.saveAnnotatedCopy()
+            default:
+                guard let tool = parts.first.flatMap(AnnotationTool.init(rawValue:)), parts.count > 1 else { break }
+                let n = parts[1].split(separator: ",").compactMap { Double($0) }
+                guard n.count == 4 else { break }
+                let item = Annotation(tool: tool, start: AnnotationPoint(x: n[0], y: n[1]), end: AnnotationPoint(x: n[2], y: n[3]),
+                                      text: parts.count > 2 ? parts[2] : nil)
+                model.changeAnnotations { $0.add(item) }
+            }
         case "shelf":
             switch argument {
             case "clear": model.clearShelf()
@@ -122,6 +150,10 @@ import AppKit
                    "context: \(model.contextBoost.map(\.rawValue).sorted().joined(separator: ","))",
                    "portal: \(model.interaction.portal.rawValue) · awareness: \(model.interaction.awareness.rawValue) · shelf: \(model.shelfCount)",
                    "portal result: \(model.portalResult.map { "\($0.title) — \($0.detail)" } ?? "-")",
+                   "screenshots: \(model.screenshots.status)",
+                   "capture: \(model.capture.map { "\($0.id.uuidString.prefix(8)) \($0.name) \(Int($0.pixelSize.width))x\(Int($0.pixelSize.height))" } ?? "-") · glance: \(model.glance)",
+                   "capture text: \(model.captureText)",
+                   "annotations: \(model.annotations.items.map(\.tool.rawValue).joined(separator: ",")) · saved: \(model.annotatedCopy?.lastPathComponent ?? "-")",
                    "mode: \(model.preferences.mode?.title ?? "Custom")"]
             try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)
         case "dumpHooks":

@@ -39,6 +39,12 @@ enum Metrics {
     static let portalTarget = 56.0
     static let portalOpening = 88.0
     static let portalResult = 52.0
+    /// Screenshot Magnet: the arrival preview, the text result, and the annotation editor.
+    static let captureGlance = 112.0
+    static let captureTextArea = 196.0
+    static let annotateWidth = 700.0
+    static let annotateToolbar = 30.0
+    static let annotateMaxCanvas = 330.0
     static let historyRow = 44.0
     static let historyGroup = 24.0
     static let commandRow = 32.0
@@ -109,6 +115,9 @@ enum Metrics {
             case .split:
                 return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.glanceHeight),
                                wing: Metrics.splitWing, ear: 10, corner: 22)
+            case .capture:
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.captureGlance),
+                               wing: Metrics.splitWing, ear: 12, corner: 24)
             default:
                 let depth = Double(model.glanceStackDepth)
                 return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing,
@@ -116,10 +125,23 @@ enum Metrics {
                                wing: Metrics.glanceWing, ear: 10, corner: 22)
             }
         case .expanded:
-            let width = workspaceWidth(display)
-            return resolve(.content(width: width, height: workspaceHeight(snapshot, model), minHeight: 56, maxHeight: 420),
+            // Annotating needs room for the image; everything else keeps the workspace's width.
+            let annotating = snapshot.route == .capture(.annotate)
+            let width = annotating ? annotationWidth(display) : workspaceWidth(display)
+            return resolve(.content(width: width, height: workspaceHeight(snapshot, model), minHeight: 56, maxHeight: annotating ? 540 : 420),
                            wing: Metrics.dockWing, ear: 14, corner: 28)
         }
+    }
+
+    static func annotationWidth(_ display: DisplayGeometry) -> Double {
+        min(Metrics.annotateWidth, display.width - 2 * SurfaceGeometryEngine.screenMargin)
+    }
+    /// The image area in the annotation editor: as wide as the surface allows, as tall as the image's
+    /// shape asks, within a ceiling. Shared by the size contract and the view.
+    static func annotationCanvas(_ display: DisplayGeometry, ear: Double, aspect: Double) -> CGSize {
+        let width = annotationWidth(display) - 2 * ear - 2 * Metrics.pad
+        let height = min(Metrics.annotateMaxCanvas, width / max(0.2, aspect))
+        return CGSize(width: min(width, height * max(0.2, aspect)), height: height)
     }
 
     static func workspaceHeight(_ snapshot: PresentationSnapshot, _ model: AppModel) -> Double {
@@ -167,6 +189,12 @@ enum Metrics {
         case .command:
             let rows = max(1, min(Metrics.maxCommandRows, model.commandResults.count))
             return pad + Metrics.field + Metrics.gap + Double(rows) * Metrics.commandRow + pad
+        case .capture(.text):
+            return pad + Metrics.header + Metrics.gap + Metrics.captureTextArea + pad
+        case .capture(.annotate):
+            let canvas = annotationCanvas(model.geometry, ear: 14, aspect: Double(model.capture?.aspect ?? 1.6))
+            return pad + Metrics.header + Metrics.gap + Metrics.annotateToolbar + Metrics.gap + canvas.height
+                + Metrics.gap + Metrics.annotateToolbar + pad
         }
     }
 

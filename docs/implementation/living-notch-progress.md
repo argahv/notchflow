@@ -82,3 +82,64 @@ list once per drag rather than on every event, and commits only when a zone chan
 | Phase 1 | 0.00 % | 0.0 % | 27.2 MB |
 
 Two short runs, not a long-session measurement; the 0.6 MB difference is within run-to-run noise.
+
+Commit: `c567ad3` (and `8a0209b` for the band fix).
+
+## Phase 2 — Screenshot Magnet
+
+**What changed.**
+- Opt-in (Settings › Screenshots, off by default). NotchFlow watches the folder macOS saves screenshots to
+  (the `location` screencapture preference, or the Desktop) with a file-system event source, and reports a
+  file only when it is new, recent, an image, and carries the `kMDItemIsScreenCapture` marker that
+  `screencapture` writes, so a downloaded or copied image is never mistaken for a screenshot. Each file is
+  reported once. If screenshots go to the clipboard or an app, Settings says so instead of watching.
+- A screenshot rises out of the notch's lower edge into a compact preview in its own aspect ratio, with its
+  pixel size, time and file name, and Copy, Extract Text, Annotate and More (Save to Shelf, Share, Open,
+  Show in Finder). The thumbnail opens Quick Look. It leaves after eight seconds, never from under the pointer.
+- Extract Text uses Vision on this Mac, off the main thread, with reading order, cancellation, an empty
+  state, errors, Copy and Save to Shelf. After three seconds it explains that the first read can be slow.
+- Annotate: arrow, rectangle, highlight, text, blur and redact, with undo and redo. Save Copy writes
+  "<name> (annotated).png" beside the original (never over anything); Copy puts the image on the clipboard.
+  Blur is labelled as not safe for secrets; Redact replaces pixels with black in the saved copy, and is
+  applied after blurs so no blur can bring a redacted area back.
+- Conflicts: a screenshot waits while a drag, an editor, the workspace or another glance has the surface, and
+  appears once it's free if it's still recent. Hidden private details: not shown at all. Quiet mode: the rim
+  lights, nothing opens. While its preview is up, passive notifications wait.
+
+**Reused.** The glance and workspace surfaces, routes and size contracts, `BackHeader`, `CompactEmptyState`,
+the shelf's intake (Save to Shelf, saving recognised text) and the Quick Look path from Phase 1, the
+directory-watch pattern, the debug channel.
+
+**Files.** New: `NotchCore/ScreenshotRules.swift`, `NotchCore/Annotation.swift`,
+`Features/ScreenshotService.swift`, `Features/CaptureProcessing.swift`, `Surfaces/CaptureSurface.swift`,
+`Tests/NotchCoreTests/ScreenshotTests.swift`. Changed: `AppModel.swift`, `Models.swift`, `Shell/Route.swift`,
+`Shell/SurfaceLayout.swift`, `Shell/OverlayView.swift`, `SettingsView.swift`, `Window/DebugChannel.swift`.
+
+**Tested.**
+- 83 Swift tests (7 new: candidates, the marker, folder resolution, deduplication, reading order, annotation
+  undo and redo, stray clicks) and 23 Python tests, all passing. Debug and Release builds.
+- The real watcher on a scratch folder (`NOTCHFLOW_SCREENSHOT_FOLDER`, Debug only): a plain image copied in
+  was ignored; a file written the way macOS writes a screenshot (a hidden file, the marker, then a rename)
+  was detected and measured (1400 × 800) within about a second; further events on the folder didn't report
+  it again.
+- Vision on a 1400 × 800 test image: the right text in the right order. The first read on this Mac took
+  about 20 seconds while the system prepared the model (also seen in a standalone script: 26.7 s cold,
+  0.18 s warm); later reads finished within about a second.
+- An annotated copy compared pixel by pixel with the original: the redacted band is solid black, the blurred
+  band is softened (text 85 → 221), the arrow is red, everything unmarked is identical, the size is unchanged,
+  and the original's bytes are unchanged.
+- A screenshot arriving while the workspace was open waited, then appeared when it closed.
+- Idle CPU with the watcher on: 0.00 % over 60 s (Debug build). Resident memory 51.6 MB after three text reads
+  and two exports; Vision keeps its model loaded once used. Long-session memory isn't measured yet.
+
+**Unverified.**
+- A real screenshot taken with ⇧⌘3/⇧⌘4 (the file and marker were reproduced, not produced by
+  `screencapture`), the Desktop access prompt when the switch is first turned on, and the five-second
+  floating-thumbnail delay: these need the switch turned on in daily use.
+- Quick Look, the Share menu and Copy (Copy would replace the clipboard during a scripted run).
+- The arrival and annotation on screen rather than offscreen; an external display.
+
+**Privacy and security.** No Screen Recording permission, no key monitoring, no network. Only the screenshot
+folder's listing and one extended attribute are read; screenshots are never moved, renamed or deleted.
+Thumbnails are in memory only. Text recognition runs on device. Annotated copies get a new name and are
+written without overwriting.

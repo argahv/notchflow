@@ -89,6 +89,8 @@ struct QuickApp: Identifiable, Equatable {
     /// The notch reacts to a drag heading for it and keeps what's dropped on the shelf. Off, a drop
     /// on the notch opens the shelf instead.
     @Published var portalEnabled: Bool { didSet { save("portalEnabled", portalEnabled) } }
+    /// Off by default: new screenshots appear in the notch. Watches the folder macOS saves them to.
+    @Published var screenshotsEnabled: Bool { didSet { save("screenshotsEnabled", screenshotsEnabled) } }
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -122,6 +124,7 @@ struct QuickApp: Identifiable, Equatable {
         lowBatteryAlerts = defaults.bool(forKey: "lowBatteryAlerts")
         contextAware = defaults.bool(forKey: "contextAware")
         portalEnabled = defaults.bool(forKey: "portalEnabled")
+        screenshotsEnabled = defaults.bool(forKey: "screenshotsEnabled")
     }
 
     var modeSettings: ModeSettings {

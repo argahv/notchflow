@@ -161,6 +161,11 @@ struct CommandItem: Identifiable {
             .store(in: &subscriptions)
         clock.onTick = { [weak self] date in self?.tick(date) }
         clock.run(countdown.running)
+        screenshots.onCapture = { [weak self] capture in self?.captureArrived(capture) }
+        screenshots.configure(enabled: preferences.screenshotsEnabled)
+        preferences.$screenshotsEnabled.dropFirst().removeDuplicates().sink { [weak self] enabled in
+            DispatchQueue.main.async { self?.screenshots.configure(enabled: enabled) }
+        }.store(in: &subscriptions)
         preferences.$bridgeEnabled.dropFirst().sink { [weak self] enabled in
             self?.providers.setEnabled("inbox", enabled)
         }.store(in: &subscriptions)
@@ -289,6 +294,8 @@ struct CommandItem: Identifiable {
     enum GlanceLead: Equatable {
         case privacy
         case notification(ActivityRecord)
+        /// A screenshot that just arrived, with its actions.
+        case capture(Capture)
         /// The most relevant item and how many other activities there are.
         case single(HoverItem, others: Int)
         /// Ambient (music or a timer) on the left, work that matters on the right, one surface.
@@ -305,6 +312,7 @@ struct CommandItem: Identifiable {
     var glanceLead: GlanceLead {
         if preferences.privacy { return .privacy }
         if case .notification(let id) = glance, let record = record(id) { return .notification(record) }
+        if case .capture(let id) = glance, let capture, capture.id == id { return .capture(capture) }
         guard let primary = hoverChoice.primary, let item = hoverItem(primary) else { return .quickAccess }
         if let secondary = hoverChoice.secondary, let other = hoverItem(secondary) {
             return primary.family.isAmbient ? .split(ambient: item, work: other, others: hoverChoice.others)
@@ -416,8 +424,10 @@ struct CommandItem: Identifiable {
         PresentationSnapshot(interaction: interaction, route: route, openNoteID: openNoteID)
     }
     private var attentionContext: AttentionContext {
-        // A drag on its way in, or a drop's result, has the surface: arrivals wait and light the rim.
-        AttentionContext(editing: interaction.editing || interaction.portal != .closed, expanded: interaction.presentation == .expanded,
+        // A drag on its way in, a drop's result or a screenshot just taken has the surface: passive
+        // arrivals wait and light the rim.
+        AttentionContext(editing: interaction.editing || interaction.portal != .closed || captureGlanceShowing,
+                         expanded: interaction.presentation == .expanded,
                          suppressed: preferences.quietMode || preferences.privacy)
     }
 
@@ -510,12 +520,13 @@ struct CommandItem: Identifiable {
         let now = interaction.presentation, was = previous.interaction.presentation
         if now == .collapsed && was != .collapsed {
             if case .notification = glance { glance = .summary; _ = attention.dismissCurrent(now: Date(), context: attentionContext) }
+            if case .capture = glance { glance = .summary; captureWork?.cancel() }
             openedByDrag = false; dropTargeted = false
-            resumeAttention()
+            resumeCapture(); resumeAttention()
         }
-        if was == .expanded && now != .expanded { resumeAttention() }
-        if previous.interaction.editing && !interaction.editing { resumeAttention() }
-        if previous.interaction.portal != .closed && interaction.portal == .closed { resumeAttention() }
+        if was == .expanded && now != .expanded { resumeCapture(); resumeAttention() }
+        if previous.interaction.editing && !interaction.editing { resumeCapture(); resumeAttention() }
+        if previous.interaction.portal != .closed && interaction.portal == .closed { resumeCapture(); resumeAttention() }
         if let feature = route.feature {
             routeMemory[feature] = route
             if feature == .activity && now == .expanded { dockBadge = nil }
@@ -1003,6 +1014,194 @@ struct CommandItem: Identifiable {
         windows?.showQuickLook()
     }
 
+    // MARK: Screenshot Magnet
+
+    let screenshots = ScreenshotService()
+    /// The latest screenshot. Memory only; the file stays where macOS saved it.
+    @Published private(set) var capture: Capture?
+    enum CaptureText: Equatable { case idle, reading, done(String), failed(String) }
+    @Published private(set) var captureText: CaptureText = .idle
+    @Published var annotations = AnnotationDocument()
+    @Published var annotationTool: AnnotationTool = .arrow
+    /// Where the last annotated copy was saved.
+    @Published private(set) var annotatedCopy: URL?
+    @Published private(set) var captureBusy = false
+    private var recognition: Task<Void, Never>?
+    private var captureWork: DispatchWorkItem?
+    private var captureWaiting = false
+
+    var captureGlanceShowing: Bool { if case .capture = glance { return true }; return false }
+
+    func captureArrived(_ capture: Capture) {
+        // With private details hidden, a screenshot is exactly the kind of thing not to show.
+        guard !preferences.privacy else { return }
+        recognition?.cancel(); recognition = nil
+        self.capture = capture
+        captureText = .idle; annotatedCopy = nil; annotations = AnnotationDocument()
+        if preferences.quietMode { illuminate(.silver); return }
+        if captureMustWait { captureWaiting = true; illuminate(.silver); return }
+        presentCapture()
+    }
+
+    /// A drag, an editor, an open workspace or another glance keeps the surface; the screenshot
+    /// waits and appears when it's free, if it's still recent.
+    private var captureMustWait: Bool {
+        if interaction.portal != .closed || interaction.editing || interaction.dragging || interaction.presentation == .expanded { return true }
+        if case .notification = glance { return true }
+        return false
+    }
+
+    private func presentCapture() {
+        guard let capture else { return }
+        captureWaiting = false
+        var next = snapshot
+        if next.interaction.presentation == .collapsed { next.interaction.send(.attention) }
+        commit(next, also: { self.glance = .capture(capture.id) })
+        illuminate(.silver)
+        scheduleCaptureDismiss()
+    }
+
+    private func resumeCapture() {
+        guard captureWaiting, let capture, Date().timeIntervalSince(capture.taken) < 90 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self, self.captureWaiting, !self.captureMustWait, self.glance == .summary else { return }
+            self.presentCapture()
+        }
+    }
+
+    /// The preview leaves on its own after a while, but never from under the pointer.
+    private func scheduleCaptureDismiss(after delay: TimeInterval = 8) {
+        captureWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.captureGlanceShowing else { return }
+            if self.windows?.pointerInside == true { self.scheduleCaptureDismiss(after: 2); return }
+            self.dismissCapture()
+        }
+        captureWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func dismissCapture() {
+        captureWork?.cancel()
+        guard captureGlanceShowing else { return }
+        var next = snapshot
+        if next.interaction.presentation == .preview, windows?.pointerInside != true { next.interaction.send(.leave) }
+        commit(next, also: { self.glance = .summary })
+    }
+
+    func copyCapture() {
+        guard let capture, let data = ImagePasteboard.pngData(of: capture.url) else {
+            message = "That screenshot is no longer where macOS saved it."; return
+        }
+        ImagePasteboard.copy(png: data, file: capture.url)
+        lockHover(); illuminate(.silver)
+    }
+
+    func saveCaptureToShelf() {
+        guard let capture else { return }
+        let result = shelf.intake([.reference(capture.url)], origin: "screenshot")
+        if result.added.isEmpty && result.duplicates == 0 { message = result.message ?? "The screenshot couldn't be added to the shelf." }
+        else { illuminate(.silver) }
+        reflow()
+    }
+
+    func revealCapture() {
+        guard let capture else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([capture.url])
+    }
+
+    func quickLookCapture() {
+        guard let capture else { return }
+        captureWork?.cancel()
+        shelf.preview.urls = [capture.url]
+        windows?.showQuickLook()
+    }
+
+    /// Reads the screenshot's text on this Mac, in the same surface. Leaving keeps the result.
+    func readCaptureText() {
+        guard let capture else { return }
+        captureWork?.cancel()
+        var next = snapshot; next.interaction.send(.expand); next.route = .capture(.text)
+        commit(next, also: { self.glance = .summary })
+        windows?.focus()
+        switch captureText {
+        case .reading, .done: return
+        case .idle, .failed: break
+        }
+        captureText = .reading
+        recognition = Task { [weak self] in
+            do {
+                let text = try await TextRecognition.text(in: capture.url)
+                guard !Task.isCancelled, let self, self.capture?.id == capture.id else { return }
+                self.captureText = .done(text); self.reflow()
+            } catch is CancellationError {
+            } catch {
+                guard let self, self.capture?.id == capture.id else { return }
+                self.captureText = .failed(error.localizedDescription); self.reflow()
+            }
+        }
+    }
+
+    func cancelCaptureText() {
+        recognition?.cancel(); recognition = nil
+        captureText = .idle; reflow()
+    }
+
+    func copyCaptureText() {
+        guard case .done(let text) = captureText, !text.isEmpty else { return }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+        illuminate(.silver)
+    }
+
+    func saveCaptureTextToShelf() {
+        guard case .done(let text) = captureText else { return }
+        let result = shelf.intake([.text(text, rich: nil)], origin: "screenshot")
+        if result.added.isEmpty && result.duplicates == 0 { message = result.message } else { illuminate(.silver) }
+    }
+
+    func annotateCapture() {
+        guard capture != nil else { return }
+        captureWork?.cancel()
+        var next = snapshot; next.interaction.send(.expand); next.route = .capture(.annotate)
+        commit(next, also: { self.glance = .summary })
+        windows?.focus()
+    }
+
+    func changeAnnotations(_ change: (inout AnnotationDocument) -> Void) {
+        change(&annotations); annotatedCopy = nil
+    }
+
+    /// Saves an annotated copy next to the original, off the main thread. The original isn't touched.
+    func saveAnnotatedCopy() {
+        guard let capture, !annotations.items.isEmpty, !captureBusy else { return }
+        captureBusy = true
+        let url = capture.url, items = annotations.items
+        Task { [weak self] in
+            let saved = await Task.detached(priority: .userInitiated) { Result { try AnnotationRenderer.saveCopy(of: url, items) } }.value
+            guard let self else { return }
+            self.captureBusy = false
+            switch saved {
+            case .success(let copy): self.annotatedCopy = copy; self.illuminate(.green)
+            case .failure(let error): self.message = error.localizedDescription
+            }
+            self.reflow()
+        }
+    }
+
+    /// Copies the annotated image without saving a file.
+    func copyAnnotated() {
+        guard let capture, !captureBusy else { return }
+        captureBusy = true
+        let url = capture.url, items = annotations.items
+        Task { [weak self] in
+            let data = await Task.detached(priority: .userInitiated) { try? AnnotationRenderer.png(AnnotationRenderer.render(url, items)) }.value
+            guard let self else { return }
+            self.captureBusy = false
+            if let data { ImagePasteboard.copy(png: data, file: nil); self.illuminate(.silver) }
+            else { self.message = AnnotationRenderer.Failure.unreadable.localizedDescription }
+        }
+    }
+
     // MARK: Notes and to-dos
 
     func newNote() {
@@ -1118,7 +1317,7 @@ struct CommandItem: Identifiable {
     }
 
     func stop() {
-        clock.run(false); providers.stopAll(); approvals.withdraw()
+        clock.run(false); providers.stopAll(); approvals.withdraw(); screenshots.stop(); recognition?.cancel()
         media.stop(); camera.stop(); backdrop.stop(); battery.stop()
     }
 }

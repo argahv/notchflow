@@ -258,6 +258,8 @@ struct GlanceView: View {
                 }
             case .notification(let record):
                 notification(record)
+            case .capture(let capture):
+                CaptureGlance(model: model, capture: capture)
             case .quickAccess:
                 QuickAccessRow(model: model)
             case .single(let item, let others):
@@ -336,6 +338,7 @@ struct GlanceView: View {
         switch lead {
         case .privacy: "privacy"
         case .notification(let record): "n-\(record.id)"
+        case .capture(let capture): "c-\(capture.id)"
         case .quickAccess: "quick"
         case .single(let item, _): "s-\(item.id)"
         case .split(let ambient, let work, _): "split-\(ambient.id)-\(work.id)"
@@ -657,6 +660,7 @@ struct WorkspaceView: View {
                     case .tools: ToolsSurface(model: model)
                     case .history: HistorySurface(model: model)
                     case .command: CommandSurface(model: model)
+                    case .capture(let mode): CaptureSurface(model: model, mode: mode)
                     }
                 }
             }
