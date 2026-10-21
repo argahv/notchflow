@@ -1,0 +1,54 @@
+name: Performance regression
+description: NotchFlow got slower, heavier, or uses more energy than it should.
+labels: ["performance", "performance regression"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        At rest NotchFlow should be close to idle. Numbers make these reports actionable:
+        `NOTCHFLOW_PROFILE_OUTPUT=idle.csv bash Scripts/profile.sh 1800 10` records CPU and memory only (no screen, clipboard or agent data).
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What regressed
+      multiple: true
+      options:
+        - CPU while idle (collapsed)
+        - CPU while hovering or expanded
+        - Memory growth over time
+        - Energy impact / battery
+        - Dropped frames / stutter in animation
+        - Slow to open or respond
+    validations:
+      required: true
+  - type: textarea
+    id: measure
+    attributes:
+      label: Measurements
+      description: Activity Monitor (CPU, Memory, Energy Impact), Scripts/profile.sh output, or Instruments traces. Before and after if you can.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: What was on screen and running (music, agents, number of activity rows, shelf items, external display).
+    validations:
+      required: true
+  - type: input
+    id: good
+    attributes:
+      label: Last good version or commit
+  - type: input
+    id: bad
+    attributes:
+      label: First bad version or commit
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Mac, macOS version, Low Power Mode on or off
+      placeholder: MacBook Air M2, macOS 15.4, Low Power Mode off
+    validations:
+      required: true

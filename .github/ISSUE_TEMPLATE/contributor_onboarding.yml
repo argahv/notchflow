@@ -1,0 +1,56 @@
+name: I'd like to contribute
+description: Tell us what you're interested in and we'll help you find a first task.
+title: "Onboarding: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Welcome! Before you start, skim [CONTRIBUTING.md](https://github.com/argahv/notchflow/blob/main/CONTRIBUTING.md) and the
+        [good first issues](https://github.com/argahv/notchflow/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+        If one of them already fits, just comment on it instead of filing this.
+  - type: dropdown
+    id: areas
+    attributes:
+      label: What interests you
+      multiple: true
+      options:
+        - SwiftUI views and animation
+        - AppKit windows and input
+        - Metal / graphics / the notch shape
+        - Accessibility
+        - Performance and profiling
+        - Agent integrations (Claude Code, Codex, Python hooks)
+        - GitHub Actions and other providers
+        - Tests
+        - Documentation
+    validations:
+      required: true
+  - type: dropdown
+    id: experience
+    attributes:
+      label: Swift and macOS experience
+      options:
+        - New to Swift
+        - Comfortable with Swift, new to macOS
+        - Shipped macOS or iOS apps
+        - Deep AppKit / graphics experience
+    validations:
+      required: true
+  - type: dropdown
+    id: hardware
+    attributes:
+      label: Hardware you can test on
+      multiple: true
+      options:
+        - A Mac with a notch
+        - A Mac without a notch
+        - An external display
+        - macOS 14
+        - macOS 15
+        - macOS 26
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Time you have, what you'd like to learn, an issue you're eyeing.

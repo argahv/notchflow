@@ -1,0 +1,78 @@
+name: Bug report
+description: Something in NotchFlow doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. For a security problem, use [private reporting](https://github.com/argahv/notchflow/security/advisories/new) instead.
+        Screenshots are very welcome, but please crop out anything personal (agent prompts, file names, notifications).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Hover the notch with music playing and Claude Code running
+        2. Click the left half of the split island
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: NotchFlow version
+      description: From Settings › About, or the commit if you built it yourself.
+      placeholder: 0.1.0 or a1b2c3d
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: macOS 15.4
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac and display
+      description: Model, and whether this was on the built-in notch, an external display, or a Mac without a notch.
+      placeholder: MacBook Pro 14" M3, built-in display
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Notch shape / hover / animation
+        - Activity stack / ranking
+        - Claude Code or Codex hooks / approvals
+        - GitHub Actions
+        - Shelf / portal / Notch Actions
+        - Screenshots / annotate
+        - Music / sound island
+        - Clipboard / tools / notes
+        - Settings
+        - Build or tests
+        - Other
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Console.app output filtered to NotchFlow, or a screen recording. Remove anything private.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true

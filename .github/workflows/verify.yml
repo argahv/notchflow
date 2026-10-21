@@ -17,7 +17,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: swift test
-      - run: bash Scripts/build.sh
+      - name: Debug build
+        run: |
+          python3 Scripts/generate_project.py
+          xcodebuild -project NotchFlow.xcodeproj -scheme NotchFlow -configuration Debug \
+            -derivedDataPath build/DebugData CODE_SIGNING_ALLOWED=NO build
+      - name: Release build (universal)
+        run: bash Scripts/build.sh
       - run: xcrun -sdk macosx metal -c Resources/LiquidGlass.metal -o build/LiquidGlass.air
       - run: ditto -c -k --keepParent build/NotchFlow.app build/NotchFlow-unsigned-universal.zip
       - uses: actions/upload-artifact@v4
