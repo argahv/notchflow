@@ -401,6 +401,16 @@ pressure. Long sessions haven't been measured.
 **Builds and tests at the end.** 108 Swift tests, 24 Python tests, Debug and universal Release builds; CI was
 green on GitHub's runner at `234b782` and later commits run there too.
 
+## README captures
+
+The README's new images are real on-screen captures (`screencapture -R`) of a Debug build running on demo
+files, over a plain backdrop window so no personal desktop shows. The app's settings were exported before and
+imported after, because a Debug build shares them with the installed app. The captures turned up four display
+bugs, fixed in `50ee4fd`: shelf tiles cut off their size-and-time line (a tile now shows one fact; VoiceOver
+reads both), "Remove Background" was truncated in the actions grid (long titles now shrink slightly), several
+items opened together were called "2 items" instead of "2 PDFs" (now named by `ContentClassifier.collection`,
+tested), and Time Travel repeated a screenshot's time. 110 Swift and 24 Python tests pass.
+
 ## Still to verify by hand
 
 These need a person at the Mac or hardware this run didn't have:

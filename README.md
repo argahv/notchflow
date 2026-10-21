@@ -40,6 +40,14 @@ Drag a file, an image, a link or some text toward the top of your screen and the
 brightens as you get close, names what's coming ("3 images", "Report.pdf") and opens a well to drop into.
 Let go, and it takes the drop in and tells you what it kept.
 
+<p align="center">
+  <img src="docs/media/portal.png" width="510" alt="A drag of three images over the notch: the notch has opened into a well that says 'Drop to keep, 3 images, kept on your shelf'.">
+</p>
+
+<p align="center">
+  <img src="docs/media/portal-kept.png" width="600" alt="After dropping two PDFs: a check mark, '2 PDFs, kept on your shelf, 2 items', and a Merge PDFs button.">
+</p>
+
 - **Your files stay where they are.** The shelf keeps a reference and never moves or changes the original.
   Images from a browser and attachments from Mail or Photos have no file of their own, so NotchFlow keeps a
   copy in its own folder and deletes it with the shelf item.
@@ -47,9 +55,17 @@ Let go, and it takes the drop in and tells you what it kept.
 - **Drag anything back out** into Finder or another app.
 - Quick Look, Open, Copy, Show in Finder and Remove on each item, and Clear with one undo.
 
+<p align="center">
+  <img src="docs/media/shelf.png" width="500" alt="The shelf with seven items: a text note with its word count, a link to apple.com, a folder, a video, a photo and two PDFs, each with its size.">
+</p>
+
 **Notch Actions.** A drop comes with its next step: drop three PDFs and **Merge PDFs** is right there. Every
 action runs on your Mac and says up front what it will do, and anything it creates can be undone. Nothing
 you drop is sent to an AI service or anywhere else.
+
+<p align="center">
+  <img src="docs/media/actions.png" width="600" alt="Actions for Sunset.jpg: Extract Text, Remove Background, Annotate, Copy, Convert to PNG, JPEG and HEIC, Resize to Half, Compress, Quick Look and Show in Finder, with a line saying actions run on this Mac.">
+</p>
 
 | You drop | You can |
 |---|---|
@@ -80,10 +96,18 @@ slow flow means working, three steps lighting in turn means tests are running, a
 waiting for you, and a check means a turn finished. It moves for a few seconds after something actually
 changes, then holds still. A session that has said nothing for ten minutes shows as quiet, not busy.
 
+<p align="center">
+  <img src="docs/media/heartbeat.png" width="420" alt="The resting notch with a status dot and, beside it, the small flowing track that means an agent is working.">
+</p>
+
 **Mission Complete.** When real work finishes, the notch marks it: a seal settles in, a silver sheen
 crosses the lower edge once, and you see the actual result with one next step. Real work means an agent
 turn of two minutes or more, a CI run, a build or deploy, a focus session, or a download of 100 MB or more.
 Several finishes close together become one ("2 tasks finished"), and it never lands while you're typing.
+
+<p align="center">
+  <img src="docs/media/mission-complete.png" width="510" alt="A celebration from the notch: a green seal, 'Claude Code, atlas-web, worked 3 min, 10 secs', and a View button.">
+</p>
 
 ## Everything that needs you, in one stack
 
@@ -114,6 +138,14 @@ boxes, highlights, text, blur and redaction, then saves a new "(annotated)" copy
 Redaction blacks out the pixels in the saved copy. NotchFlow only picks up files macOS marked as
 screenshots, and never moves, renames or deletes them. It's off by default.
 
+<p align="center">
+  <img src="docs/media/screenshot.png" width="510" alt="A new screenshot in the notch: its thumbnail, pixel size, time and file name, with Copy, Extract Text, Annotate and more.">
+</p>
+
+<p align="center">
+  <img src="docs/media/annotate.png" width="600" alt="The annotation editor in the notch: a highlighted line, a red box and an arrow on a screenshot of release notes, with Copy and Save Copy.">
+</p>
+
 ## A notch that keeps up
 
 **Living Split Island.** When music or a timer is playing while an agent works, hovering the notch shows
@@ -121,14 +153,26 @@ both side by side. Pin the one you care about and it stays. Swipe sideways over 
 to switch to the next agent or download. Requests and failures still take the lead, and each side says why
 it's there.
 
+<p align="center">
+  <img src="docs/media/split-island.png" width="510" alt="The notch split in two: a focus session with 24:57 remaining and a pause button, beside Claude Code working in atlas-web.">
+</p>
+
 **Time Travel.** Hold **⌥** and scroll on the notch, or press **⌘Y** in the workspace, to step back
 through finished runs, downloads, shelf items, your latest screenshot and, if the clipboard is on, what you
 copied. Each moment keeps only the actions that still work: **Show in Finder** disappears once a file is
 gone. Nothing new is stored. It's built from what NotchFlow already keeps.
 
+<p align="center">
+  <img src="docs/media/time-travel.png" width="500" alt="Time Travel: moment 2 of 8, a text note kept on the shelf, with older and newer moments blurred on either side, and Actions and Copy buttons.">
+</p>
+
 **Sound Island.** Put on AirPods and the notch says "AirPods Pro connected", with volume, mute, a quick
 output switch, and play and next when Music or Spotify is in use. It listens to Core Audio (no permission
 needed) and gets out of the way after five seconds.
+
+<p align="center">
+  <img src="docs/media/sound.png" width="510" alt="'AirPods Pro connected' in the notch, with a volume slider and an output switch.">
+</p>
 
 ## Small tools, right where you look
 
@@ -237,7 +281,7 @@ Events go to an owner-only local inbox; there's no listening port. See the [even
 
 ## Status
 
-**Developer preview.** NotchFlow is built and tested on a MacBook Air with a notch: 109 Swift and 24 Python
+**Developer preview.** NotchFlow is built and tested on a MacBook Air with a notch: 110 Swift and 24 Python
 tests, end-to-end hook checks, and frame-by-frame recordings of its transitions. The newest features (the
 portal, screenshots, actions, the agent heartbeat, the split island, Time Travel and the sound island) were
 run on a Debug build through the same code a drop, a screenshot or an output change goes through. Some
