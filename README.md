@@ -225,11 +225,6 @@ Download the zip from the [latest release](https://github.com/argahv/notchflow/r
 other app. It needs macOS 14.6 or later and runs natively on Apple silicon and Intel. Each release lists a
 SHA-256 checksum.
 
-> [!NOTE]
-> **Release 0.1.0 predates some of this page.** The drop portal and Notch Actions, Screenshots, Agent
-> Heartbeat and Mission Complete, the Living Split Island, Time Travel and the Sound Island landed after it.
-> Until the next release, [build from source](#get-notchflow) to try them.
-
 <details>
 <summary>Build it yourself instead</summary>
 
@@ -294,7 +289,7 @@ Events go to an owner-only local inbox; there's no listening port. See the [even
 
 ## Status
 
-**Developer preview (0.1).** NotchFlow is built and tested on a MacBook Air with a notch: 110 Swift and 24
+**Developer preview (0.2).** NotchFlow is built and tested on a MacBook Air with a notch: 110 Swift and 24
 Python tests run in CI on every push, alongside Debug and universal Release builds, plus end-to-end hook
 checks and frame-by-frame recordings of its transitions. The newest features (the portal, screenshots,
 actions, the agent heartbeat, the split island, Time Travel and the sound island) were run on a Debug build
