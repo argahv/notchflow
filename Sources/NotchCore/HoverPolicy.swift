@@ -93,8 +93,15 @@ public enum HoverPolicy {
             let keep = current?.secondary.flatMap { old in ranked.first { $0.id == old.id } }
             if let keep, keep.id != primary.id, pairs(primary, keep) {
                 secondary = keep
-            } else {
-                secondary = ranked.first { $0.id != primary.id && pairs(primary, $0) }
+            } else if !situation.locked {
+                // A new secondary must not reshape the surface while the pointer is over its
+                // controls. When a critical event replaces the lead, however, preserve the old
+                // item as the second half if it pairs (e.g. Claude input + playing music).
+                if let shown, shown.id != primary.id, pairs(primary, shown) {
+                    secondary = shown
+                } else if !situation.hovered || current?.primary == nil {
+                    secondary = ranked.first { $0.id != primary.id && pairs(primary, $0) }
+                }
             }
         }
         let others = ranked.filter { !$0.family.isAmbient && $0.id != primary.id && $0.id != secondary?.id }.count

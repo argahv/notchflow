@@ -341,19 +341,23 @@ def permission_detail(tool_input):
     return None
 
 def read_decision(path, request):
+    """Read an owner-only response exactly once, without following symlinks."""
     try:
-        metadata = os.lstat(path)
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     except OSError:
         return None
     try:
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid() or metadata.st_size > 4096:
-            return None
-        response = json.loads(path.read_text())
-    except (OSError, ValueError):
+        with os.fdopen(fd, "rb") as stream:
+            metadata = os.fstat(stream.fileno())
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid() \
+                    or metadata.st_mode & 0o077 or metadata.st_size > 4096:
+                return None
+            response = json.loads(stream.read(4097).decode("utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
         return None
     finally:
         try:
-            path.unlink()  # a response is read once
+            path.unlink()  # response is consumed even when invalid
         except OSError:
             pass
     if not isinstance(response, dict) or response.get("requestId") != request["id"] \

@@ -40,7 +40,7 @@ import Darwin
                                    "timestamp": now.formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))]
         // The id was validated as 32 lowercase hex characters, so it's a safe file name.
         try Self.writePrivately(JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]),
-                                to: responses.appendingPathComponent(request.id + ".json"))
+                                to: responses.appendingPathComponent(request.id + ".json"), replaceExisting: false)
     }
 
     /// Removes responses a hook never collected because it had already timed out.
@@ -62,17 +62,23 @@ import Darwin
     }
 
     /// Owner-only and atomic: a reader sees either nothing or the whole file.
-    static func writePrivately(_ data: Data, to url: URL) throws {
+    static func writePrivately(_ data: Data, to url: URL, replaceExisting: Bool = true) throws {
         let temporary = url.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString).tmp")
         let descriptor = Darwin.open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
         guard descriptor >= 0 else { throw EventError.invalid("Couldn't write \(url.lastPathComponent).") }
         let written = data.withUnsafeBytes { Darwin.write(descriptor, $0.baseAddress, $0.count) }
         let synced = fsync(descriptor) == 0
         Darwin.close(descriptor)
-        guard written == data.count, synced, Darwin.rename(temporary.path, url.path) == 0 else {
+        guard written == data.count, synced else {
             unlink(temporary.path)
             throw EventError.invalid("Couldn't write \(url.lastPathComponent).")
         }
+        // Presence may be refreshed; permission responses must never overwrite an unanswered
+        // decision. A hard link in the same directory is atomic and fails if the destination exists.
+        let installed = replaceExisting ? Darwin.rename(temporary.path, url.path) == 0
+                                        : Darwin.link(temporary.path, url.path) == 0
+        if !replaceExisting || !installed { unlink(temporary.path) }
+        guard installed else { throw EventError.invalid("That request has already been answered.") }
     }
 }
 

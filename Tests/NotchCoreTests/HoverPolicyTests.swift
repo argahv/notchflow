@@ -65,6 +65,35 @@ final class HoverPolicyTests: XCTestCase {
         XCTAssertNil(choose([c("music", .music, .music), c("input", .input, .agent)], split: false).secondary, "narrow displays stay single")
     }
 
+    func testHoverDoesNotResizeIntoNewSplitUnderPointer() {
+        let shown = choose([c("music", .music, .music)], split: true)
+        let later = choose([c("music", .music, .music), c("build", .running, .pipeline)],
+                           shown, hovered: true)
+        XCTAssertEqual(later.primary?.id, "music")
+        XCTAssertNil(later.secondary, "background work should not add a split beneath the pointer")
+        XCTAssertEqual(later.others, 1)
+    }
+
+    func testLockedControlKeepsExistingSplitStable() {
+        let shown = choose([c("input", .input, .agent), c("music", .music, .music)])
+        let later = choose([c("input", .input, .agent), c("music", .music, .music),
+                            c("timer", .imminent, .timer)], shown, hovered: true, locked: true)
+        XCTAssertEqual(later.primary?.id, "input")
+        XCTAssertEqual(later.secondary?.id, "music", "active media control must not change underneath the pointer")
+        let single = choose([c("music", .music, .music)], split: true)
+        let locked = choose([c("music", .music, .music), c("build", .running, .pipeline)],
+                            single, hovered: true, locked: true)
+        XCTAssertNil(locked.secondary, "a locked single preview must remain single")
+    }
+
+    func testCriticalArrivalPreservesOldAmbientAsSplit() {
+        let shown = choose([c("music", .music, .music)])
+        let later = choose([c("music", .music, .music), c("approval", .input, .agent)],
+                           shown, hovered: true)
+        XCTAssertEqual(later.primary?.id, "approval")
+        XCTAssertEqual(later.secondary?.id, "music")
+    }
+
     func testCountExcludesWhatsShownAndAmbientItems() {
         let choice = choose([c("input", .input, .agent), c("music", .music, .music), c("build", .running, .pipeline), c("dl", .general, .download)])
         XCTAssertEqual(choice.primary?.id, "input")

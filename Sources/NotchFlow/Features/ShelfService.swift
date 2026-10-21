@@ -24,16 +24,30 @@ import Combine
         } catch { self.error = error.localizedDescription; return nil }
     }
 
-    private var thumbnails: [UUID: NSImage] = [:]
+    // QuickLook previews can be surprisingly large. NSCache evicts under memory pressure and
+    // these limits keep long-lived Shelf sessions from accumulating every thumbnail ever visited.
+    // Include requested pixel size so a tiny preview never gets stretched into a blurry large one.
+    private let thumbnails: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 24
+        cache.totalCostLimit = 32 * 1024 * 1024
+        return cache
+    }()
     /// A QuickLook thumbnail, falling back to the Finder icon. Generated locally and cached in memory only.
     func thumbnail(for item: ShelfFile, size: CGSize, scale: CGFloat) async -> NSImage? {
-        if let cached = thumbnails[item.id] { return cached }
+        let pixelsWide = max(1, Int((size.width * scale).rounded(.up)))
+        let pixelsHigh = max(1, Int((size.height * scale).rounded(.up)))
+        let key = "\(item.id.uuidString):\(pixelsWide)x\(pixelsHigh)" as NSString
+        if let cached = thumbnails.object(forKey: key) { return cached }
         guard let url = resolve(item) else { return nil }
         let access = url.startAccessingSecurityScopedResource(); defer { if access { url.stopAccessingSecurityScopedResource() } }
         let request = QLThumbnailGenerator.Request(fileAt: url, size: size, scale: scale, representationTypes: .thumbnail)
         let image = (try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request))?.nsImage
             ?? NSWorkspace.shared.icon(forFile: url.path)
-        thumbnails[item.id] = image
+        guard !Task.isCancelled else { return nil }
+        // Approximate RGBA cost. NSCache may discard previews sooner when memory is constrained.
+        let cost = pixelsWide * pixelsHigh * 4
+        thumbnails.setObject(image, forKey: key, cost: cost)
         return image
     }
     func resolve(_ item: ShelfFile) -> URL? {
@@ -61,9 +75,9 @@ import Combine
     func remove(_ item: ShelfFile) {
         // Keep an unmanaged copy for undo; removing a reference never deletes its original.
         removed = ShelfFile(name: item.name, bookmark: item.bookmark)
-        context?.delete(item); save()
+        context?.delete(item); thumbnails.removeAllObjects(); save()
     }
-    func undo() { guard let removed else { return }; context?.insert(removed); self.removed = nil; save() }
+    func undo() { guard let removed else { return }; context?.insert(removed); self.removed = nil; thumbnails.removeAllObjects(); save() }
     private func save() { do { try context?.save() } catch { self.error = error.localizedDescription } }
     func chooseFiles() {
         let picker = NSOpenPanel(); picker.allowsMultipleSelection = true; picker.canChooseDirectories = true

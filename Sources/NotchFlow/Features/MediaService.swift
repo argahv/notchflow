@@ -104,7 +104,9 @@ import Combine
 
     func command(_ command: Command) {
         if !isRunning { openPlayer(); return }
-        _ = script(command.rawValue)
+        // Never show a successful transport action when AppleScript actually failed (for example
+        // Automation permission denied or the player quitting between the running check and call).
+        guard script(command.rawValue) != nil else { return }
         if command == .toggle { playing.toggle() }
         if poll != nil { refresh() }
     }
@@ -114,7 +116,7 @@ import Combine
     func seek(to fraction: Double) {
         guard isRunning, duration > 0 else { return }
         let seconds = max(0, min(duration - 0.5, fraction * duration))
-        _ = script("set player position to \(String(format: "%.2f", seconds))")
+        guard script("set player position to \(String(format: "%.2f", seconds))") != nil else { return }
         elapsed = seconds
         if poll != nil { refresh() }
     }
