@@ -82,6 +82,8 @@ final class ShelfPreview: NSObject, QLPreviewPanelDataSource {
                 guard ShelfPolicy.fits(existing: count, adding: 1) else { throw ShelfPolicy.Refusal.full }
                 let made: ShelfFile?
                 switch item {
+                case .reference(let url) where ShelfPolicy.isTemporary(path: url.standardizedFileURL.path):
+                    made = try copy(try Self.copyIn(url), ownedTotal: copyBytes)
                 case .reference(let url): made = try reference(url, known: &locations)
                 case .copy(let url): made = try copy(url, ownedTotal: copyBytes)
                 case .text(let text, let rich): made = try snippet(text, rich: rich, known: keys)
@@ -113,6 +115,16 @@ final class ShelfPreview: NSObject, QLPreviewPanelDataSource {
         let file = ShelfFile(name: url.lastPathComponent, bookmark: bookmark)
         describe(file, url)
         return file
+    }
+
+    /// Copies a file out of a temporary place into the shelf's own folder before macOS removes it.
+    private static func copyIn(_ url: URL) throws -> URL {
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard Int64(size) <= ShelfPolicy.maxOwnedItemBytes else { throw ShelfPolicy.Refusal.tooLarge(url.lastPathComponent) }
+        let folder = try makeCopyFolder()
+        let target = folder.appendingPathComponent(ShelfPolicy.safeFileName(url.lastPathComponent, fallback: "Item"))
+        do { try FileManager.default.copyItem(at: url, to: target); return target }
+        catch { try? FileManager.default.removeItem(at: folder); throw ShelfPolicy.Refusal.unavailable(url.lastPathComponent) }
     }
 
     private func copy(_ url: URL, ownedTotal: Int) throws -> ShelfFile {

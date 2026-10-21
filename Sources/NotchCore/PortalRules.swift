@@ -210,6 +210,17 @@ public enum ShelfPolicy {
         return name.isEmpty ? fallback : name
     }
 
+    /// Files in temporary places vanish soon after a drop (a screenshot dragged from its floating
+    /// thumbnail lives in `TemporaryItems` until macOS saves it), so the shelf keeps a copy of them
+    /// rather than a reference that would break.
+    public static func isTemporary(path: String) -> Bool {
+        let path = path.hasPrefix("/private/") ? String(path.dropFirst("/private".count)) : path
+        if path.hasPrefix("/tmp/") { return true }
+        guard path.hasPrefix("/var/folders/") else { return false }
+        let parts = path.split(separator: "/")   // var, folders, xx, <id>, T or TemporaryItems, …
+        return parts.count > 5 && (parts[4] == "T" || parts[4] == "TemporaryItems")
+    }
+
     /// Copies on disk that no shelf item refers to any more (after a removal that wasn't undone, or a
     /// crash mid-drop). Paths are relative to the shelf's folder.
     public static func orphans(onDisk: [String], referenced: Set<String>) -> [String] {

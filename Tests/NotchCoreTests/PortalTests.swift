@@ -158,6 +158,16 @@ final class PortalTests: XCTestCase {
         XCTAssertFalse(ShelfPolicy.safeFileName("x/y", fallback: "Item").contains("/"))
     }
 
+    func testFilesInTemporaryPlacesAreCopiedNotReferenced() {
+        XCTAssertTrue(ShelfPolicy.isTemporary(path: "/private/var/folders/1c/4xtrzl710hb293y3z7_3sbbw0000gn/TemporaryItems/NSIRD_screencaptureui_l8wb1O/Screenshot.png"),
+                      "a screenshot dragged from its floating thumbnail")
+        XCTAssertTrue(ShelfPolicy.isTemporary(path: "/var/folders/1c/abc/T/com.apple.Safari/image.jpg"))
+        XCTAssertTrue(ShelfPolicy.isTemporary(path: "/private/tmp/export.pdf"))
+        XCTAssertFalse(ShelfPolicy.isTemporary(path: "/Users/someone/Downloads/report.pdf"))
+        XCTAssertFalse(ShelfPolicy.isTemporary(path: "/var/folders/1c/abc/C/com.apple.cache/thing"), "caches aren't temporary items")
+        XCTAssertFalse(ShelfPolicy.isTemporary(path: "/Users/someone/tmp/notes.txt"))
+    }
+
     func testOrphanedCopiesAreFound() {
         XCTAssertEqual(ShelfPolicy.orphans(onDisk: ["b/2.png", "a/1.pdf", "c/3.txt"], referenced: ["a/1.pdf"]), ["b/2.png", "c/3.txt"])
         XCTAssertTrue(ShelfPolicy.orphans(onDisk: [], referenced: ["a"]).isEmpty)
