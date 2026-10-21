@@ -204,6 +204,7 @@ class AgentHookTests(unittest.TestCase):
             responses = root / "responses"; responses.mkdir(mode=0o700, exist_ok=True)
             temporary = responses / ".tmp"
             temporary.write_text(json.dumps({"requestId": request["id"], "nonce": nonce or request["nonce"], "decision": decision}))
+            temporary.chmod(0o600)  # mirror the native app's owner-only, atomic response writer
             os.replace(temporary, responses / (request["id"] + ".json"))
         thread = threading.Thread(target=answer); thread.start(); return thread
 
@@ -247,6 +248,7 @@ class AgentHookTests(unittest.TestCase):
             response.symlink_to(target)
             self.assertIsNone(bridge.read_decision(response, request), "symlinks must never be followed")
             self.assertTrue(target.exists(), "symlink rejection must not delete the target")
+            response.unlink()
             response.write_text(body)
             response.chmod(0o600)
             self.assertEqual(bridge.read_decision(response, request), "allow")
