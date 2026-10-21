@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest something NotchFlow could do. Bigger ideas are best started in Discussions.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like
+      description: How it would look or behave. Sketches and screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Fit with NotchFlow's principles
+      description: Not every box has to be ticked, but say why in the proposal if one isn't.
+      options:
+        - label: Works locally, with no new account, server or telemetry.
+        - label: Any new data access is opt-in and off by default.
+        - label: It doesn't steal keyboard focus or open the notch on its own.
+  - type: dropdown
+    id: help
+    attributes:
+      label: Would you like to build it?
+      options:
+        - Yes, I'd like to open a PR
+        - Maybe, with some guidance
+        - No, just suggesting

@@ -1,0 +1,43 @@
+name: Accessibility issue
+description: Something is hard or impossible to use with VoiceOver, the keyboard, or display and motion settings.
+labels: ["accessibility"]
+body:
+  - type: markdown
+    attributes:
+      value: Accessibility bugs are treated as bugs, not enhancements. Thank you for reporting.
+  - type: dropdown
+    id: tech
+    attributes:
+      label: What you were using
+      multiple: true
+      options:
+        - VoiceOver
+        - Keyboard only / Full Keyboard Access
+        - Reduce Motion
+        - Reduce Transparency
+        - Increase Contrast
+        - Larger text / Display zoom
+        - Voice Control
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened
+      description: What you tried to do, what VoiceOver read or what you saw, and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: NotchFlow version and macOS version
+      placeholder: 0.1.0 on macOS 15.4
+    validations:
+      required: true
