@@ -195,7 +195,7 @@ printf 'nowplaying:Night Drive|Demo Artist\nhover:enter\n' > ~/Library/Applicati
 ```
 
 The full command list lives in [`Window/DebugChannel.swift`](Sources/NotchFlow/Window/DebugChannel.swift)
-(documenting it is [a help-wanted task](https://github.com/argahv/notchflow/issues?q=is%3Aissue+DebugChannel)).
+(documenting it is [a help-wanted task](https://github.com/argahv/notchflow/issues/10)).
 To post realistic activity, use the event CLI:
 
 ```bash
