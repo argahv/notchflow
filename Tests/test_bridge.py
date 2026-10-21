@@ -232,6 +232,26 @@ class AgentHookTests(unittest.TestCase):
             self.assertEqual(json.loads(out)["hookSpecificOutput"]["decision"]["behavior"], "deny")
             self.assertEqual(events[-1]["agent"]["state"], "working")
 
+    def test_response_requires_private_file_and_refuses_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            response = root / ("a" * 32 + ".json")
+            request = {"id": "a" * 32, "nonce": "b" * 32}
+            body = json.dumps({"requestId": request["id"], "nonce": request["nonce"], "decision": "allow"})
+            response.write_text(body)
+            response.chmod(0o644)
+            self.assertIsNone(bridge.read_decision(response, request), "world-readable approvals must be ignored")
+            self.assertFalse(response.exists(), "invalid responses are consumed")
+            target = root / "other.json"
+            target.write_text(body)
+            response.symlink_to(target)
+            self.assertIsNone(bridge.read_decision(response, request), "symlinks must never be followed")
+            self.assertTrue(target.exists(), "symlink rejection must not delete the target")
+            response.write_text(body)
+            response.chmod(0o600)
+            self.assertEqual(bridge.read_decision(response, request), "allow")
+            self.assertFalse(response.exists())
+
     def test_wrong_nonce_and_timeout_fall_back_to_the_agent_prompt(self):
         with tempfile.TemporaryDirectory() as directory:
             events, out = self.answer(Path(directory), "allow", nonce="0" * 32, wait=1.0)

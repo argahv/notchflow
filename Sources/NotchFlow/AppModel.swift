@@ -454,7 +454,9 @@ struct CommandItem: Identifiable {
     func reflow(animation: Animation? = nil) {
         let choice = refreshedHoverChoice()
         let changed = !sameHover(choice, hoverChoice)
-        commit(snapshot, animation: animation ?? Motion.quick, also: changed ? { self.hoverChoice = choice } : nil)
+        // Let geometry-changing reflows use the surface's interruptible spring. Explicit callers
+        // may still request quick row updates without changing the outer shape.
+        commit(snapshot, animation: animation, also: changed ? { self.hoverChoice = choice } : nil)
     }
 
     /// The one path to any visual change: compute the next form from the snapshot, grow the panel

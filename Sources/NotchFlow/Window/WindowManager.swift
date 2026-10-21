@@ -19,6 +19,7 @@ import Carbon
 @MainActor final class TrackingHostingView<Content: View>: NSHostingView<Content> {
     var model: AppModel?
     private var tracking: NSTrackingArea?
+    private var scrollDistance: CGFloat = 0
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func updateTrackingAreas() {
         if let tracking { removeTrackingArea(tracking) }
@@ -28,9 +29,30 @@ import Carbon
     override func mouseEntered(with event: NSEvent) { model?.windows?.cancelDismissal(); model?.hoverBegan() }
     override func mouseExited(with event: NSEvent) { model?.hoverEnded(); model?.windows?.scheduleLeave() }
     override func scrollWheel(with event: NSEvent) {
-        guard let model, model.interaction.presentation != .expanded else { super.scrollWheel(with: event); return }
-        // A deliberate two-finger pull on the resting notch opens it; momentum and small deltas don't.
-        if event.momentumPhase.isEmpty, abs(event.scrollingDeltaY) > 4 { model.openWorkspace(); model.windows?.focus() }
+        // Scrolling inside a preview or workspace belongs to the content, not the notch gesture.
+        guard let model, model.interaction.presentation == .collapsed else {
+            scrollDistance = 0
+            super.scrollWheel(with: event)
+            return
+        }
+        // Require a deliberate, predominantly vertical trackpad gesture. Wheel ticks, inertial
+        // scroll, and tiny accidental movements must not steal focus from the foreground app.
+        guard event.hasPreciseScrollingDeltas, event.momentumPhase.isEmpty else {
+            scrollDistance = 0
+            return
+        }
+        if event.phase.contains(.began) { scrollDistance = 0 }
+        if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
+            scrollDistance = 0
+            return
+        }
+        guard event.phase.contains(.began) || event.phase.contains(.changed) else { return }
+        guard abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX) * 1.25 else { return }
+        scrollDistance += abs(event.scrollingDeltaY)
+        guard scrollDistance >= 28 else { return }
+        scrollDistance = 0
+        model.openWorkspace()
+        model.windows?.focus()
     }
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         guard sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]),
@@ -215,7 +237,9 @@ import Carbon
     /// The pointer counts as inside a little beyond the edge, so a natural move toward a control
     /// near the rim doesn't collapse the surface.
     var pointerInside: Bool {
-        panel.isVisible && panel.frame.insetBy(dx: -10, dy: -10).contains(NSEvent.mouseLocation)
+        // During a morph the technical NSPanel can be larger than the visible surface. Using the
+        // panel frame would treat transparent padding as hovered and prevent dismissal indefinitely.
+        panel.isVisible && frame(for: model.form.size).insetBy(dx: -10, dy: -10).contains(NSEvent.mouseLocation)
     }
     func scheduleLeave() {
         cancelDismissal()
