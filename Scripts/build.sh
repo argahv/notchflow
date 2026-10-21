@@ -16,4 +16,12 @@ xcodebuild -project NotchFlow.xcodeproj -scheme NotchFlow -configuration Release
 mkdir -p build
 rm -rf build/NotchFlow.app
 ditto build/DerivedData/Build/Products/Release/NotchFlow.app build/NotchFlow.app
-echo 'Built build/NotchFlow.app (unsigned). For permissions and login items, sign in Xcode.'
+# Optional for local builds: sign with your identity so macOS keeps privacy permissions (Downloads,
+# Desktop) across rebuilds. An unsigned build is a new app to macOS each time and asks again.
+if [[ -n "${NOTCHFLOW_SIGN_IDENTITY:-}" ]]; then
+  codesign --force --options runtime --timestamp=none --entitlements Resources/NotchFlow.entitlements \
+    --sign "$NOTCHFLOW_SIGN_IDENTITY" build/NotchFlow.app
+  echo "Built build/NotchFlow.app, signed for local use."
+else
+  echo 'Built build/NotchFlow.app (unsigned). For permissions and login items, set NOTCHFLOW_SIGN_IDENTITY or sign in Xcode.'
+fi

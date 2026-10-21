@@ -17,15 +17,20 @@ struct OverlayView: View {
             VStack(spacing: 0) {
                 NotchBand(model: model, clock: model.clock, battery: model.battery, media: model.media)
                 Group {
-                    switch presentation {
-                    case .collapsed:
-                        if model.interaction.awareness == .drag { DropApproach() }
-                    case .preview:
-                        GlanceView(model: model, media: model.media, clock: model.clock)
+                    if presentation != .expanded && model.interaction.portal != .closed {
+                        PortalView(model: model, stage: model.interaction.portal)
                             .frame(width: form.size.width, height: contentHeight, alignment: .top)
-                    case .expanded:
-                        WorkspaceView(model: model)
-                            .frame(width: form.size.width, height: contentHeight, alignment: .top)
+                    } else {
+                        switch presentation {
+                        case .collapsed:
+                            EmptyView()
+                        case .preview:
+                            GlanceView(model: model, media: model.media, clock: model.clock)
+                                .frame(width: form.size.width, height: contentHeight, alignment: .top)
+                        case .expanded:
+                            WorkspaceView(model: model)
+                                .frame(width: form.size.width, height: contentHeight, alignment: .top)
+                        }
                     }
                 }
                 .transition(.surfaceContent)
@@ -36,6 +41,13 @@ struct OverlayView: View {
         .overlay { EdgeLight(shape: shape, presentation: presentation, awareness: model.interaction.awareness,
                              moving: model.surfaceMoving, band: model.geometry.band) }
         .overlay { RimIllumination(shape: shape, illumination: model.illumination, band: model.geometry.band) }
+        // A kept drop pulls the lower rim up for a beat as it's drawn in, then the shape settles.
+        .keyframeAnimator(initialValue: 1.0, trigger: model.portalPulse) { content, squash in
+            content.scaleEffect(x: 1, y: squash, anchor: .top)
+        } keyframes: { _ in
+            CubicKeyframe(Motion.reduced ? 1 : 0.965, duration: 0.14)
+            SpringKeyframe(1, duration: 0.34, spring: Spring(response: 0.34, dampingRatio: 0.7))
+        }
         .contentShape(shape)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.nookNamespace, space)
@@ -61,10 +73,12 @@ struct NotchBand: View {
 
     var body: some View {
         let expanded = model.interaction.presentation == .expanded
+        // ZStack, not Group: a Group with nothing to show drops its frame, the gap slides off the
+        // camera, and the other side's status ends up behind the housing.
         HStack(spacing: 0) {
-            Group { if expanded { leadingDock } else { leadingStatus } }.frame(maxWidth: .infinity)
+            ZStack { if expanded { leadingDock } else { leadingStatus } }.frame(maxWidth: .infinity)
             Color.clear.frame(width: CGFloat(model.geometry.notchWidth))
-            Group { if expanded { trailingDock } else { trailingStatus } }.frame(maxWidth: .infinity)
+            ZStack { if expanded { trailingDock } else { trailingStatus } }.frame(maxWidth: .infinity)
         }
         .frame(height: model.geometry.band)
         .contentShape(Rectangle())
@@ -79,7 +93,7 @@ struct NotchBand: View {
 
     // Resting and glance: a single status each side, nothing when there is nothing to say.
     @ViewBuilder private var leadingStatus: some View {
-        if model.interaction.presentation == .collapsed, let status = model.leadingStatus {
+        if model.interaction.presentation == .collapsed, !model.portalShowing, let status = model.leadingStatus {
             switch status {
             case .privacy:
                 Image(systemName: "eye.slash").font(.system(size: 11, weight: .semibold)).foregroundStyle(Ink.secondary)
@@ -100,10 +114,15 @@ struct NotchBand: View {
                         Text("\(count)").font(TypeScale.badge).monospacedDigit().foregroundStyle(Ink.secondary)
                             .contentTransition(.numericText()).animation(Motion.micro, value: count)
                     }
+                    // What agents are doing, as far as their own events say.
+                    if let pulse = model.agentPulse {
+                        AgentHeartbeat(pulse: pulse, changed: model.agentPulseChanged)
+                    }
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(count > 1 ? "\(count) activities. Most urgent: \(top.event.title), \(top.event.lifecycle.label)"
-                                              : "\(top.event.title), \(top.event.lifecycle.label)")
+                .accessibilityLabel((count > 1 ? "\(count) activities. Most urgent: \(top.event.title), \(top.event.lifecycle.label)"
+                                               : "\(top.event.title), \(top.event.lifecycle.label)")
+                                    + (model.agentPulse.map { ". " + AgentHeartbeat.label($0) } ?? ""))
             case .music:
                 Group {
                     if let artwork = media.artwork { ArtworkView(image: artwork, size: 18) }
@@ -128,7 +147,7 @@ struct NotchBand: View {
             default: return false
             }
         }()
-        if let status = model.trailingStatus, !glanceShowsTimer {
+        if let status = model.trailingStatus, !glanceShowsTimer, !model.portalShowing {
             switch status {
             case .timer:
                 Text(model.timerLabel(at: clock.now))
@@ -221,18 +240,6 @@ struct NotchBand: View {
     }
 }
 
-/// While a file drag approaches, the resting notch becomes a target big enough to receive it.
-struct DropApproach: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "tray.and.arrow.down.fill").foregroundStyle(Ink.silver)
-            Text("Drop to shelf").font(TypeScale.cardTitle)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .reveal(.primary)
-    }
-}
-
 // MARK: - Glance
 
 /// The hover preview: whatever matters most right now (input needed, a failure, a running agent or
@@ -255,7 +262,15 @@ struct GlanceView: View {
                     Spacer(minLength: 8)
                 }
             case .notification(let record):
-                notification(record)
+                if let celebration = model.celebration, celebration.lead == record.id {
+                    CelebrationGlance(model: model, record: record, celebration: celebration)
+                } else {
+                    notification(record)
+                }
+            case .capture(let capture):
+                CaptureGlance(model: model, capture: capture)
+            case .sound(let transition):
+                SoundGlance(model: model, sound: model.sound, media: media, transition: transition)
             case .quickAccess:
                 QuickAccessRow(model: model)
             case .single(let item, let others):
@@ -334,6 +349,8 @@ struct GlanceView: View {
         switch lead {
         case .privacy: "privacy"
         case .notification(let record): "n-\(record.id)"
+        case .capture(let capture): "c-\(capture.id)"
+        case .sound(let transition): "sound-\(transition.name)"
         case .quickAccess: "quick"
         case .single(let item, _): "s-\(item.id)"
         case .split(let ambient, let work, _): "split-\(ambient.id)-\(work.id)"
@@ -460,7 +477,9 @@ private struct CountChip: View {
     }
 }
 
-/// One half of the split island. Hovering highlights just this region; the surface doesn't move.
+/// One half of the split island. Hovering highlights just this region and offers to keep it shown or
+/// to switch it to the next item of its kind (also by swiping sideways over it); the surface doesn't move.
+/// Clicking lights it for a beat while the other half fades, then the surface grows into its destination.
 private struct SplitRegion: View {
     @ObservedObject var model: AppModel
     @ObservedObject var media: MediaService
@@ -469,24 +488,48 @@ private struct SplitRegion: View {
     let others: Int
     @State private var hovering = false
     var body: some View {
-        HStack(spacing: 8) {
-            Button { model.openHoverItem(item) } label: {
+        let focus = model.splitFocus
+        let pinned = model.hoverPin == item.id
+        let alternatives = model.hoverAlternatives(item)
+        HStack(spacing: 6) {
+            Button { model.lockHover(); model.openSplitRegion(item) } label: {
                 HoverItemLabel(model: model, media: media, clock: clock, item: item, compact: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(PressScale())
-            .help("\(HoverText.destination(item)) · ⌃⌥Space opens the workspace")
-            .accessibilityHint("Opens \(HoverText.destination(item))")
+            .help("\(model.hoverReason(item)) · \(HoverText.destination(item)) · ⌃⌥Space opens the workspace")
+            .accessibilityHint("\(model.hoverReason(item)). Opens \(HoverText.destination(item))")
+            if hovering || pinned {
+                Button { model.toggleHoverPin(item) } label: { Image(systemName: pinned ? "pin.fill" : "pin") }
+                    .buttonStyle(IconButtonStyle(size: 22, tint: pinned ? Ink.primary : Ink.secondary))
+                    .help(pinned ? "Stop keeping this shown" : "Keep this shown")
+                    .accessibilityLabel(pinned ? "Stop keeping shown" : "Keep shown")
+                    .transition(.opacity)
+            }
+            if hovering && alternatives > 0 {
+                Button { model.cycleHover(model.hoverSide(item), step: 1) } label: { Image(systemName: "chevron.right") }
+                    .buttonStyle(IconButtonStyle(size: 22, tint: Ink.secondary))
+                    .help("Show the next one · or swipe sideways")
+                    .accessibilityLabel("Show next")
+                    .transition(.opacity)
+            }
             HoverItemTrailing(model: model, media: media, item: item, compact: true)
             if others > 0 { CountChip(model: model, others: others) }
         }
         .padding(.horizontal, 8)
         .frame(maxHeight: .infinity)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Ink.elevated.opacity(hovering ? 0.6 : 0)).padding(.vertical, 8))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Ink.elevated.opacity(focus == item.id ? 0.95 : hovering ? 0.6 : 0)).padding(.vertical, 8))
+        .scaleEffect(focus == item.id && !Motion.reduced ? 1.03 : 1)
+        .opacity(focus != nil && focus != item.id ? 0.35 : 1)
         .onHover { hovering = $0 }
         .animation(Motion.micro, value: hovering)
+        .animation(Motion.micro, value: focus)
         .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        .accessibilityAction(named: "Show next") { model.cycleHover(model.hoverSide(item), step: 1) }
+        .accessibilityAction(named: "Show previous") { model.cycleHover(model.hoverSide(item), step: -1) }
+        .accessibilityAction(named: pinned ? "Stop keeping shown" : "Keep shown") { model.toggleHoverPin(item) }
     }
 }
 
@@ -494,12 +537,28 @@ private struct SplitRegion: View {
 private struct QuickAccessRow: View {
     @ObservedObject var model: AppModel
     var body: some View {
-        HStack(spacing: 6) {
-            shortcut(.music, "Music", "music.note", 0)
-            shortcut(.shelf, "Shelf", "tray", 1)
-            shortcut(.tools(nil), "Tools", "square.grid.2x2", 2)
+        VStack(spacing: 2) {
+            HStack(spacing: 6) {
+                shortcut(.music, "Music", "music.note", 0)
+                shortcut(.shelf, "Shelf", "tray", 1)
+                shortcut(.tools(nil), "Tools", "square.grid.2x2", 2)
+            }
+            .frame(maxHeight: .infinity)
+            // Shown until dismissed or until the first drop, then never again.
+            if model.preferences.portalEnabled && !model.preferences.portalHintSeen {
+                HStack(spacing: 4) {
+                    Image(systemName: "tray.and.arrow.down").font(.system(size: 9.5, weight: .semibold))
+                    Text("Tip: drop anything on the notch to keep it").font(.system(size: 10.5, weight: .medium))
+                    Spacer(minLength: 2)
+                    Button { model.preferences.portalHintSeen = true } label: { Image(systemName: "xmark") }
+                        .buttonStyle(IconButtonStyle(size: 16, tint: Ink.secondary)).accessibilityLabel("Dismiss tip")
+                }
+                .foregroundStyle(Ink.secondary)
+                .frame(height: Metrics.hintRow)
+                .padding(.bottom, 4)
+                .reveal(.detail)
+            }
         }
-        .frame(maxHeight: .infinity)
     }
     private func shortcut(_ route: Route, _ title: String, _ symbol: String, _ index: Int) -> some View {
         QuickShortcut(title: title, symbol: symbol) { model.navigate(route); model.windows?.focus() }
@@ -655,6 +714,9 @@ struct WorkspaceView: View {
                     case .tools: ToolsSurface(model: model)
                     case .history: HistorySurface(model: model)
                     case .command: CommandSurface(model: model)
+                    case .capture(let mode): CaptureSurface(model: model, mode: mode)
+                    case .actions: ActionsSurface(model: model)
+                    case .timeline: TimelineSurface(model: model)
                     }
                 }
             }

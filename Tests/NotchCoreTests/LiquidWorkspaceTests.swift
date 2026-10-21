@@ -106,7 +106,8 @@ final class InteractionContractTests: XCTestCase {
         state.send(.dragApproach); state.send(.approach); XCTAssertEqual(state.awareness, .drag)
         state.send(.beginDrag); state.send(.retreat)
         XCTAssertEqual(state.awareness, .drag, "an active drag keeps the target ready")
-        state.send(.endDrag); XCTAssertEqual(state.awareness, .none)
+        state.send(.endDrag); XCTAssertEqual(state.awareness, .drag, "leaving the target keeps it ready while the drag is near")
+        state.send(.retreat); XCTAssertEqual(state.awareness, .none)
         state.send(.approach); state.send(.dismiss); XCTAssertEqual(state.awareness, .none)
     }
 

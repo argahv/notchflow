@@ -2,8 +2,11 @@ import SwiftUI
 import SwiftData
 import Combine
 import Carbon
+import Quartz
 
 @MainActor final class NotchPanel: NSPanel {
+    /// The shelf's Quick Look source; the preview panel finds it through this window.
+    var preview: ShelfPreview?
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
@@ -14,12 +17,16 @@ import Carbon
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         isReleasedWhenClosed = false
     }
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { preview?.urls.isEmpty == false }
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) { panel.dataSource = preview }
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel!) { panel.dataSource = nil }
 }
 
 @MainActor final class TrackingHostingView<Content: View>: NSHostingView<Content> {
     var model: AppModel?
     private var tracking: NSTrackingArea?
     private var scrollDistance: CGFloat = 0
+    private var sideways: CGFloat = 0
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func updateTrackingAreas() {
         if let tracking { removeTrackingArea(tracking) }
@@ -29,6 +36,28 @@ import Carbon
     override func mouseEntered(with event: NSEvent) { model?.windows?.cancelDismissal(); model?.hoverBegan() }
     override func mouseExited(with event: NSEvent) { model?.hoverEnded(); model?.windows?.scheduleLeave() }
     override func scrollWheel(with event: NSEvent) {
+        // A deliberate sideways swipe over the preview switches the half under the pointer to the next
+        // item of its kind. Vertical scrolling is never taken for this.
+        if let model, model.interaction.presentation == .preview, event.hasPreciseScrollingDeltas, event.momentumPhase.isEmpty,
+           abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) * 1.5 {
+            if event.phase.contains(.began) { sideways = 0 }
+            sideways += event.scrollingDeltaX
+            if abs(sideways) >= 36 {
+                let point = convert(event.locationInWindow, from: nil)
+                model.cycleHover(leftHalf: point.x < bounds.midX, step: sideways < 0 ? 1 : -1)
+                sideways = 0
+            }
+            return
+        }
+        if event.phase.contains(.ended) || event.phase.contains(.cancelled) { sideways = 0 }
+        // In Time Travel, scrolling moves through time: back is earlier, forward is later.
+        if let model, model.interaction.presentation == .expanded, model.route == .timeline {
+            if event.phase.contains(.began) { sideways = 0 }
+            let delta = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) ? -event.scrollingDeltaX : event.scrollingDeltaY
+            sideways += event.hasPreciseScrollingDeltas ? delta : delta * 12
+            if abs(sideways) >= 30 { model.moveTimeline(sideways > 0 ? 1 : -1); sideways = 0 }
+            return
+        }
         // Scrolling inside a preview or workspace belongs to the content, not the notch gesture.
         guard let model, model.interaction.presentation == .collapsed else {
             scrollDistance = 0
@@ -51,21 +80,24 @@ import Carbon
         scrollDistance += abs(event.scrollingDeltaY)
         guard scrollDistance >= 28 else { return }
         scrollDistance = 0
+        // With ⌥ held, the same deliberate gesture opens Time Travel instead.
+        if event.modifierFlags.contains(.option) { model.openTimeline(); return }
         model.openWorkspace()
         model.windows?.focus()
     }
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]),
-              model?.preferences.privacy == false else { return [] }
-        model?.windows?.cancelDismissal(); model?.dragEntered(); return .copy
+        // A drag that started in NotchFlow (an item leaving the shelf) never lands back on it.
+        guard let model, model.preferences.privacy == false, sender.draggingSource == nil,
+              let cargo = PortalIntake.cargo(of: sender.draggingPasteboard) else { return [] }
+        sender.numberOfValidItemsForDrop = cargo.count
+        model.windows?.cancelDismissal(); model.dragEntered(cargo); return .copy
     }
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { model?.dropTargeted == true ? .copy : [] }
     override func draggingExited(_ sender: NSDraggingInfo?) { model?.dragExited() }
-    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { true }
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { model?.dropTargeted == true }
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
-              let model else { return false }
-        return model.didDrop(urls)
+        guard let model else { return false }
+        return model.receiveDrop(sender.draggingPasteboard, sequence: sender.draggingSequenceNumber)
     }
 }
 
@@ -88,9 +120,13 @@ import Carbon
     private var suspended = false
     private var transitions = 0
     private var pointerNear = false
-    private var dragNear = false
-    private var dragCarriesFiles: Bool?
+    private var dragZone = AppModel.DragProximity.away
+    /// What the current drag carries, from its type list; nil when nothing in it can be kept.
+    private var dragCargo: PortalCargo?
+    private var dragEligible: Bool?
     private var dragChangeCount = -1
+    /// A drag that can be kept is within reach of the notch.
+    var dragIsNear: Bool { dragZone != .away }
     private(set) var screen: NSScreen?
 
     init(model: AppModel, container: ModelContainer) { self.model = model; self.container = container }
@@ -98,7 +134,8 @@ import Carbon
     func start() {
         let root = OverlayView(model: model).environmentObject(model.preferences).modelContainer(container)
         let host = TrackingHostingView(rootView: root)
-        host.model = model; host.registerForDraggedTypes([.fileURL]); host.sizingOptions = []
+        host.model = model; host.registerForDraggedTypes(PortalIntake.draggedTypes); host.sizingOptions = []
+        panel.preview = model.shelf.preview
         // Host inside a plain container: as the content view, NSHostingView re-requests window
         // constraint passes during frame changes until AppKit throws.
         let content = NSView(frame: .zero)
@@ -225,6 +262,13 @@ import Carbon
     }
     /// Only explicit actions call this; passive notifications never take focus.
     func focus() { panel.makeKey(); panel.makeFirstResponder(host) }
+    /// Quick Look for the shelf item the model prepared. The panel is made key first so the preview
+    /// panel finds its source in this window.
+    func showQuickLook() {
+        focus()
+        guard let preview = QLPreviewPanel.shared() else { return }
+        if preview.isVisible { preview.reloadData() } else { preview.makeKeyAndOrderFront(nil) }
+    }
     /// `restoringFocus: false` when the action that closes the workspace brings another app forward.
     func close(restoringFocus: Bool = true) {
         model.send(.dismiss); panel.resignKey()
@@ -285,6 +329,12 @@ import Carbon
     }
 
     private func pointerMoved() {
+        // Plain pointer movement means no button is held, so no drag is in flight: a portal still
+        // waiting for one (its mouse-up went unseen) lets go.
+        if model.interaction.portal.carrying, !model.interaction.dragging {
+            dragZone = .away; dragEligible = nil
+            model.dragProximity(.away, cargo: nil)
+        }
         guard !suspended, panel.isVisible, model.interaction.presentation == .collapsed else {
             if pointerNear { pointerNear = false }
             return
@@ -298,23 +348,30 @@ import Carbon
     private func pointerDragged() {
         let pasteboard = NSPasteboard(name: .drag)
         if pasteboard.changeCount != dragChangeCount {
-            // Only the type list is read, never the dragged contents.
+            // Only the type lists are read, never the dragged contents. Once per drag, not per event.
             dragChangeCount = pasteboard.changeCount
-            dragCarriesFiles = pasteboard.types?.contains(.fileURL) == true
+            dragCargo = PortalRules.cargo(itemTypes: (pasteboard.pasteboardItems ?? []).map { $0.types.map(\.rawValue) })
+            dragEligible = dragCargo != nil
         }
-        guard dragCarriesFiles == true, !model.preferences.privacy,
-              model.interaction.presentation == .collapsed || dragNear else { return }
-        let near = notchRect.insetBy(dx: -150, dy: -120).contains(NSEvent.mouseLocation)
-        guard near != dragNear else { return }
-        dragNear = near
-        model.send(near ? .dragApproach : .retreat)
+        guard dragEligible == true, !model.preferences.privacy, model.preferences.portalEnabled,
+              model.interaction.presentation != .expanded || dragZone != .away else { return }
+        // Two zones: near (the notch swells) and close (it becomes a target). Each is left a little
+        // further out than it's entered, so a drag resting on an edge never flickers.
+        let point = NSEvent.mouseLocation
+        let closeReach = dragZone == .close ? 24.0 : 0, nearReach = dragZone == .away ? 0.0 : 24
+        let zone: AppModel.DragProximity =
+            notchRect.insetBy(dx: -150 - closeReach, dy: -110 - closeReach).contains(point) ? .close
+            : notchRect.insetBy(dx: -340 - nearReach, dy: -260 - nearReach).contains(point) ? .near : .away
+        guard zone != dragZone else { return }
+        dragZone = zone
+        model.dragProximity(zone, cargo: dragCargo)
     }
 
     private func dragFinished() {
-        dragCarriesFiles = nil
-        guard dragNear else { return }
-        dragNear = false
-        model.send(.retreat)
+        dragEligible = nil
+        let wasNear = dragZone != .away
+        dragZone = .away; dragCargo = nil
+        if wasNear || model.interaction.portal.carrying { model.dragProximity(.away, cargo: nil) }
     }
 
     private func installKeyboard() {
@@ -325,6 +382,12 @@ import Carbon
             if event.keyCode == 53 {
                 if composing { return event }
                 self.model.back(); return nil
+            }
+            if self.model.route == .timeline, !composing, [123, 124].contains(event.keyCode) {
+                self.model.moveTimeline(event.keyCode == 123 ? 1 : -1); return nil
+            }
+            if event.modifierFlags.contains(.command), !composing, event.charactersIgnoringModifiers?.lowercased() == "y" {
+                self.model.openTimeline(); return nil
             }
             if self.model.route == .command, !composing, [125, 126].contains(event.keyCode) {
                 self.model.moveCommandSelection(event.keyCode == 125 ? 1 : -1); return nil

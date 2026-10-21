@@ -161,6 +161,13 @@ struct CommandItem: Identifiable {
             .store(in: &subscriptions)
         clock.onTick = { [weak self] date in self?.tick(date) }
         clock.run(countdown.running)
+        screenshots.onCapture = { [weak self] capture in self?.captureArrived(capture) }
+        sound.onTransition = { [weak self] transition in self?.soundChanged(transition) }
+        sound.start()
+        screenshots.configure(enabled: preferences.screenshotsEnabled)
+        preferences.$screenshotsEnabled.dropFirst().removeDuplicates().sink { [weak self] enabled in
+            DispatchQueue.main.async { self?.screenshots.configure(enabled: enabled) }
+        }.store(in: &subscriptions)
         preferences.$bridgeEnabled.dropFirst().sink { [weak self] enabled in
             self?.providers.setEnabled("inbox", enabled)
         }.store(in: &subscriptions)
@@ -289,6 +296,10 @@ struct CommandItem: Identifiable {
     enum GlanceLead: Equatable {
         case privacy
         case notification(ActivityRecord)
+        /// A screenshot that just arrived, with its actions.
+        case capture(Capture)
+        /// Sound moved to another output: the device, its volume, and a quick switch.
+        case sound(SoundTransition)
         /// The most relevant item and how many other activities there are.
         case single(HoverItem, others: Int)
         /// Ambient (music or a timer) on the left, work that matters on the right, one surface.
@@ -305,6 +316,8 @@ struct CommandItem: Identifiable {
     var glanceLead: GlanceLead {
         if preferences.privacy { return .privacy }
         if case .notification(let id) = glance, let record = record(id) { return .notification(record) }
+        if case .capture(let id) = glance, let capture, capture.id == id { return .capture(capture) }
+        if glance == .sound, let soundTransition { return .sound(soundTransition) }
         guard let primary = hoverChoice.primary, let item = hoverItem(primary) else { return .quickAccess }
         if let secondary = hoverChoice.secondary, let other = hoverItem(secondary) {
             return primary.family.isAmbient ? .split(ambient: item, work: other, others: hoverChoice.others)
@@ -369,10 +382,201 @@ struct CommandItem: Identifiable {
 
     private func refreshedHoverChoice(fresh: Bool = false) -> HoverChoice {
         let previewing = interaction.presentation == .preview
+        let candidates = hoverCandidates
+        // A pin lapses when its item ends; it's never kept for something that isn't live.
+        if let pin = hoverPin, !candidates.contains(where: { $0.id == pin }) { hoverPin = nil }
         let situation = HoverPolicy.Situation(hovered: !fresh && previewing && windows?.pointerInside == true,
                                               locked: !fresh && Date() < hoverLockedUntil,
-                                              allowSplit: SurfaceLayout.splitFits(geometry))
-        return HoverPolicy.choose(hoverCandidates, current: fresh ? nil : hoverChoice, situation: situation)
+                                              allowSplit: SurfaceLayout.splitFits(geometry), pinned: hoverPin)
+        return HoverPolicy.choose(candidates, current: fresh ? nil : hoverChoice, situation: situation)
+    }
+
+    // MARK: Spatial Sound Island
+
+    let sound = SoundService()
+    @Published private(set) var soundTransition: SoundTransition?
+    private var soundWork: DispatchWorkItem?
+
+    /// Sound moved to another output: a short glance with the device, its volume and a quick switch,
+    /// then the notch retracts. Waits like a screenshot does; quiet mode only lights the rim.
+    func soundChanged(_ transition: SoundTransition) {
+        guard preferences.soundIslandEnabled, !preferences.privacy else { return }
+        soundTransition = transition
+        if preferences.quietMode || captureMustWait || captureGlanceShowing { illuminate(.silver); return }
+        refreshAudioOutputs()
+        var next = snapshot
+        if next.interaction.presentation == .collapsed { next.interaction.send(.attention) }
+        commit(next, also: { self.glance = .sound })
+        illuminate(.silver)
+        scheduleSoundDismiss()
+    }
+
+    private func scheduleSoundDismiss(after delay: TimeInterval = 5) {
+        soundWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.glance == .sound else { return }
+            if self.windows?.pointerInside == true { self.scheduleSoundDismiss(after: 2); return }
+            self.dismissSound()
+        }
+        soundWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func dismissSound() {
+        soundWork?.cancel()
+        guard glance == .sound else { return }
+        var next = snapshot
+        if next.interaction.presentation == .preview, windows?.pointerInside != true { next.interaction.send(.leave) }
+        commit(next, also: { self.glance = .summary })
+    }
+
+    func setSoundVolume(_ value: Float) { sound.setVolume(value); lockHover(); scheduleSoundDismiss(after: 4) }
+    func toggleSoundMute() { sound.toggleMute(); lockHover(); scheduleSoundDismiss(after: 4) }
+    func chooseSoundOutput(_ device: AudioOutput) { selectAudioOutput(device); lockHover(); scheduleSoundDismiss(after: 4) }
+
+    // MARK: Time Travel
+
+    /// Assembled when Time Travel opens, from what NotchFlow already keeps; nothing is stored for it.
+    @Published private(set) var timeline: [TimelineEntry] = []
+    @Published private(set) var timelineCursor = TimelineCursor(count: 0)
+    var timelineEntry: TimelineEntry? { timeline.indices.contains(timelineCursor.index) ? timeline[timelineCursor.index] : nil }
+
+    func openTimeline() {
+        timeline = buildTimeline()
+        timelineCursor = TimelineCursor(count: timeline.count)
+        navigate(.timeline); windows?.focus()
+    }
+
+    func moveTimeline(_ step: Int) {
+        var cursor = timelineCursor; cursor.move(step)
+        guard cursor != timelineCursor else { return }
+        withAnimation(Motion.selection) { timelineCursor = cursor }
+    }
+    func timelineToPresent() { withAnimation(Motion.selection) { timelineCursor = TimelineCursor(count: timeline.count) } }
+
+    private func buildTimeline() -> [TimelineEntry] {
+        let finished = queue.records.filter { $0.event.lifecycle.terminal }.map { record -> TimelineEntry in
+            let kind: TimelineEntry.Kind = switch record.event.kind {
+            case .agent: .agent
+            case .ci, .build, .deploy: .pipeline
+            case .download: .download
+            case .timer: .timer
+            default: record.event.source == "timer" ? .timer : .task
+            }
+            return TimelineEntry(id: "a:" + record.id, date: record.event.timestamp, kind: kind, title: record.event.title,
+                                 detail: ActivityText.subtitle(record))
+        }
+        let kept = shelf.items.map {
+            TimelineEntry(id: "s:" + $0.id.uuidString, date: $0.addedAt, kind: .shelf, title: $0.name,
+                          detail: $0.origin == "screenshot" ? "Screenshot on your shelf" : "Kept on your shelf")
+        }
+        // The card shows its own time, so the detail is only the screenshot's pixel size.
+        let screenshot: [TimelineEntry] = capture.map { shot -> [TimelineEntry] in
+            let size = shot.pixelSize.width > 0 ? " · \(Int(shot.pixelSize.width)) × \(Int(shot.pixelSize.height))" : ""
+            return [TimelineEntry(id: "p:" + shot.url.path, date: shot.taken, kind: .screenshot, title: shot.name, detail: "Screenshot" + size)]
+        } ?? []
+        // Clipboard text only when that feature is on, and never with private details hidden. Secrets are
+        // never in it to begin with.
+        let clips = preferences.clipboardEnabled && !preferences.privacy ? clipboard.items.map {
+            TimelineEntry(id: "c:" + $0.id.uuidString, date: $0.date, kind: .clipboard,
+                          title: ShelfPolicy.title(forText: $0.text), detail: "Copied" + ($0.source.map { " in \($0)" } ?? ""))
+        } : []
+        let days = preferences.historyRetentionDays
+        return TimelineRules.merge([finished, kept, screenshot, clips], since: days > 0 ? Date().addingTimeInterval(-Double(days) * 86_400) : nil)
+    }
+
+    struct TimelineAction: Identifiable { let id: String; let title: String; let perform: () -> Void }
+    /// What can be done with a moment, offered only while its source still exists.
+    func timelineActions(_ entry: TimelineEntry) -> [TimelineAction] {
+        let key = String(entry.id.dropFirst(2))
+        switch entry.id.prefix(2) {
+        case "a:":
+            guard let record = record(key) else { return [] }
+            var actions = [TimelineAction(id: "details", title: "Details") { [weak self] in self?.navigate(.history(detail: record.id)) }]
+            if record.event.actionURL != nil, [.download, .ci, .build, .deploy].contains(record.event.kind) {
+                if record.event.kind == .download, let url = record.event.actionURL.flatMap(URL.init(string:)),
+                   !FileManager.default.fileExists(atPath: url.path) { return actions }
+                actions.append(TimelineAction(id: "open", title: actionTitle(record)) { [weak self] in self?.openAction(record) })
+            }
+            return actions
+        case "s:":
+            guard let item = shelf.items.first(where: { $0.id.uuidString == key }) else { return [] }
+            if item.isFile, shelf.resolve(item) == nil { return [] }
+            return [TimelineAction(id: "actions", title: "Actions") { [weak self] in self?.openActions([item.id]) },
+                    TimelineAction(id: "copy", title: "Copy") { [weak self] in self?.copyShelfItem(item) }]
+        case "p:":
+            guard let capture, capture.url.path == key, FileManager.default.fileExists(atPath: key) else { return [] }
+            return [TimelineAction(id: "copy", title: "Copy") { [weak self] in self?.copyCapture() },
+                    TimelineAction(id: "reveal", title: "Show in Finder") { [weak self] in self?.revealCapture() }]
+        case "c:":
+            guard let clip = clipboard.items.first(where: { $0.id.uuidString == key }) else { return [] }
+            return [TimelineAction(id: "copy", title: "Copy Again") { [weak self] in self?.clipboard.copy(clip); self?.illuminate(.silver) }]
+        default:
+            return []
+        }
+    }
+
+    // MARK: Living Split Island
+
+    /// The hover item kept on the island, in memory only. Requests and failures still take the lead.
+    @Published private(set) var hoverPin: String?
+    /// The region just clicked, lit for a beat before the surface grows into it.
+    @Published private(set) var splitFocus: String?
+
+    func toggleHoverPin(_ item: HoverItem) {
+        hoverPin = hoverPin == item.id ? nil : item.id
+        lockHover(); reflow()
+    }
+
+    /// Shows the next (or previous) item of the same kind on one side of the island.
+    func cycleHover(_ side: HoverPolicy.Side, step: Int) {
+        let next = HoverPolicy.cycle(hoverCandidates, current: hoverChoice, side: side, step: step)
+        guard !sameHover(next, hoverChoice) else { return }
+        lockHover(3)
+        commit(snapshot, animation: Motion.quick, also: { self.hoverChoice = next })
+    }
+
+    /// From a sideways swipe: the half under the pointer is the side that changes.
+    func cycleHover(leftHalf: Bool, step: Int) {
+        if case .split(let ambient, let work, _) = glanceLead {
+            let item = leftHalf ? ambient : work
+            cycleHover(hoverChoice.primary?.id == item.id ? .primary : .secondary, step: step)
+        } else {
+            cycleHover(.primary, step: step)
+        }
+    }
+
+    func hoverSide(_ item: HoverItem) -> HoverPolicy.Side { hoverChoice.primary?.id == item.id ? .primary : .secondary }
+    /// A live hover item by its id ("music", "timer", or an activity's id).
+    func hoverItem(id: String) -> HoverItem? {
+        hoverCandidates.first { $0.id == id }.flatMap(hoverItem)
+    }
+    func hoverAlternatives(_ item: HoverItem) -> Int {
+        HoverPolicy.alternatives(hoverCandidates, current: hoverChoice, side: hoverSide(item))
+    }
+
+    /// Why an item is on the island, in a few words: the ranking made visible.
+    func hoverReason(_ item: HoverItem) -> String {
+        if hoverPin == item.id { return "Kept shown" }
+        let tier = [hoverChoice.primary, hoverChoice.secondary].compactMap { $0 }.first { $0.id == item.id }?.tier
+        switch tier {
+        case .input?: return "Needs you"
+        case .failure?: return "Failed recently"
+        case .pinned?: return "Pinned"
+        case .imminent?: return item.id == "timer" ? "Timer running" : "Starting soon"
+        case .foreground?: return "Related to the app in front"
+        case .running?: return "Running"
+        case .music?: return "Playing"
+        case .general?, nil: return "Live"
+        }
+    }
+
+    /// Clicking a region: it lights for a beat, the other fades, then the surface grows into it.
+    func openSplitRegion(_ item: HoverItem) {
+        splitFocus = item.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + (Motion.reduced ? 0 : 0.12)) { [weak self] in
+            self?.openHoverItem(item); self?.splitFocus = nil
+        }
     }
 
     /// Same items in the same places: a refresh that changes nothing visible commits nothing.
@@ -416,7 +620,10 @@ struct CommandItem: Identifiable {
         PresentationSnapshot(interaction: interaction, route: route, openNoteID: openNoteID)
     }
     private var attentionContext: AttentionContext {
-        AttentionContext(editing: interaction.editing, expanded: interaction.presentation == .expanded,
+        // A drag on its way in, a drop's result or a screenshot just taken has the surface: passive
+        // arrivals wait and light the rim.
+        AttentionContext(editing: interaction.editing || interaction.portal != .closed || captureGlanceShowing || glance == .sound,
+                         expanded: interaction.presentation == .expanded,
                          suppressed: preferences.quietMode || preferences.privacy)
     }
 
@@ -477,8 +684,10 @@ struct CommandItem: Identifiable {
         if nextForm.size != form.size { windows?.prepare(for: nextForm.size) }
         let transition = windows?.beginTransition() ?? 0
         let reshaping = nextForm.size != previousForm.size || next.interaction.presentation != previous.interaction.presentation
-        let motion = animation ?? Motion.surface(from: previous.interaction.presentation, to: next.interaction.presentation,
-                                                 growing: nextForm.size.height >= previousForm.size.height)
+        let portalMoved = next.interaction.portal != previous.interaction.portal && next.interaction.presentation != .expanded
+        let motion = animation ?? (portalMoved ? Motion.portal(to: next.interaction.portal)
+            : Motion.surface(from: previous.interaction.presentation, to: next.interaction.presentation,
+                             growing: nextForm.size.height >= previousForm.size.height))
         withAnimation(motion, completionCriteria: .removed) {
             if reshaping { surfaceMoving = true }
             interaction = next.interaction
@@ -506,12 +715,15 @@ struct CommandItem: Identifiable {
     private func didCommit(from previous: PresentationSnapshot) {
         let now = interaction.presentation, was = previous.interaction.presentation
         if now == .collapsed && was != .collapsed {
-            if case .notification = glance { glance = .summary; _ = attention.dismissCurrent(now: Date(), context: attentionContext) }
+            if case .notification = glance { glance = .summary; celebration = nil; _ = attention.dismissCurrent(now: Date(), context: attentionContext) }
+            if case .capture = glance { glance = .summary; captureWork?.cancel() }
+            if glance == .sound { glance = .summary; soundWork?.cancel() }
             openedByDrag = false; dropTargeted = false
-            resumeAttention()
+            resumeCapture(); resumeAttention()
         }
-        if was == .expanded && now != .expanded { resumeAttention() }
-        if previous.interaction.editing && !interaction.editing { resumeAttention() }
+        if was == .expanded && now != .expanded { resumeCapture(); resumeAttention() }
+        if previous.interaction.editing && !interaction.editing { resumeCapture(); resumeAttention() }
+        if previous.interaction.portal != .closed && interaction.portal == .closed { resumeCapture(); resumeAttention() }
         if let feature = route.feature {
             routeMemory[feature] = route
             if feature == .activity && now == .expanded { dockBadge = nil }
@@ -544,6 +756,7 @@ struct CommandItem: Identifiable {
             try queue.ingest(event)
             persistQueue()
             recordAgentStep(event)
+            if record(event.key)?.event == event { trackAgent(event, prior: prior) }
             let updated = record(event.key)?.event
             let order = interaction.presentation == .expanded ? stackPlacement(for: event.key, prior: prior) : nil
             if updated == event && event.isMaterialChange(from: prior) { deliver(event) }
@@ -573,6 +786,16 @@ struct CommandItem: Identifiable {
     }
 
     private func deliver(_ event: ActivityEvent) {
+        // Mission Complete: a meaningful finish right after another joins the moment already showing.
+        if var shown = celebration, glance == .notification(shown.lead), let record = record(event.key),
+           let completion = completion(for: record), completionPolicy.joins(completion, shownSince: shown.since),
+           completionPolicy.importance(of: completion, in: .init()) == .celebrate {
+            shown.batch.append(completion)
+            (shown.title, shown.detail) = CompletionPolicy.headline(shown.batch)
+            celebration = shown
+            scheduleDismiss(AttentionItem(id: shown.lead, priority: .informational, arrived: Date()))
+            return
+        }
         let item = AttentionItem(id: event.key, priority: AttentionPriority(state: event.lifecycle), arrived: Date())
         switch attention.receive(item, context: attentionContext) {
         case .present(let item): present(item)
@@ -588,12 +811,30 @@ struct CommandItem: Identifiable {
     }
 
     private func present(_ item: AttentionItem) {
-        guard record(item.id) != nil else { attention.discard(id: item.id); return }
+        guard let record = record(item.id) else { attention.discard(id: item.id); return }
+        // Finished work: a short celebration when it's meaningful and the moment is free, a plain glance
+        // when it isn't meaningful or would land on typing, and only the rim in quiet situations.
+        var moment: Celebration?
+        if let completion = completion(for: record) {
+            let situation = CompletionPolicy.Situation(quiet: preferences.quietMode, typing: Self.typingNow,
+                                                       busy: interaction.presentation == .expanded || windows?.pointerInside == true)
+            switch completionPolicy.importance(of: completion, in: situation) {
+            case .indicate:
+                illuminate(.green)
+                _ = attention.dismissCurrent(now: Date(), context: attentionContext); resumeAttention()
+                return
+            case .celebrate:
+                moment = Celebration(lead: item.id, batch: [completion], since: Date(),
+                                     title: celebrationTitle(record), detail: celebrationDetail(record, completion))
+            case .glance:
+                break
+            }
+        }
         illuminate(item.priority.tone)
         var next = snapshot
         if next.interaction.presentation == .collapsed { next.interaction.send(.attention) }
         // Notifications never take keyboard focus.
-        commit(next, also: { self.glance = .notification(item.id) })
+        commit(next, also: { self.glance = .notification(item.id); self.celebration = moment })
         scheduleDismiss(item)
     }
 
@@ -615,7 +856,7 @@ struct CommandItem: Identifiable {
         let next = attention.dismissCurrent(now: Date(), context: attentionContext)
         var snapshot = self.snapshot
         if snapshot.interaction.presentation == .preview, windows?.pointerInside != true { snapshot.interaction.send(.leave) }
-        commit(snapshot, also: { self.glance = .summary })
+        commit(snapshot, also: { self.glance = .summary; self.celebration = nil })
         if let next { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.present(next) } }
     }
 
@@ -828,42 +1069,644 @@ struct CommandItem: Identifiable {
         DispatchQueue.main.asyncAfter(deadline: .now() + next.timeIntervalSince(now) + 0.5, execute: work)
     }
 
-    // MARK: Shelf drag and drop
+    // MARK: Notch portal and shelf drops
 
-    func dragEntered() {
+    enum DragProximity { case away, near, close }
+    /// What the drag heading for the notch carries, as the portal names it.
+    @Published private(set) var portalCargo: PortalCargo?
+    /// What the last drop became, shown while it's drawn in.
+    @Published private(set) var portalResult: PortalResult?
+    /// Changes once per kept drop, so the silhouette's absorption beat runs exactly then.
+    @Published private(set) var portalPulse: UUID?
+    struct PortalResult: Equatable {
+        let id = UUID()
+        let kept: Bool
+        let title: String
+        let detail: String
+        let previews: [PortalPreview]
+        /// The shelf items this drop added, and the actions offered for them right here.
+        var items: [UUID] = []
+        var actions: [ContentAction] = []
+    }
+    struct PortalPreview: Identifiable, Equatable { let id: UUID; let icon: NSImage?; let symbol: String }
+    private var portalWork: DispatchWorkItem?
+    private var lastDropSequence: Int?
+
+    /// The portal has the surface: a target, an opening, or a drop's result instead of the band or glance.
+    var portalShowing: Bool { interaction.presentation != .expanded && ![.closed, .aware].contains(interaction.portal) }
+
+    /// A drag carrying something the notch can keep moved nearer or further. Off when the portal is.
+    func dragProximity(_ proximity: DragProximity, cargo: PortalCargo?) {
+        guard preferences.portalEnabled || proximity == .away else { return }
+        var next = snapshot
+        switch proximity {
+        case .away: next.interaction.send(.retreat)
+        case .near: next.interaction.send(.dragApproach)
+        case .close: next.interaction.send(.dragAttract)
+        }
+        commit(next, also: proximity == .away ? nil : { if let cargo { self.portalCargo = cargo } })
+    }
+
+    func dragEntered(_ cargo: PortalCargo?) {
         returnWork?.cancel()
-        if interaction.presentation != .expanded { openedByDrag = true }
-        var next = snapshot; next.interaction.send(.beginDrag); next.route = .shelf
-        commit(next, also: { self.dropTargeted = true })
+        var next = snapshot
+        if next.interaction.presentation == .expanded || !preferences.portalEnabled {
+            // An open workspace, or the portal turned off, takes the drop into the shelf itself.
+            if next.interaction.presentation != .expanded { openedByDrag = true; next.interaction.send(.expand) }
+            next.interaction.send(.beginDrag); next.route = .shelf
+            commit(next, also: { self.dropTargeted = true })
+            return
+        }
+        portalWork?.cancel()
+        next.interaction.send(.beginDrag)
+        commit(next, also: {
+            self.dropTargeted = true; self.portalResult = nil
+            if let cargo { self.portalCargo = cargo }
+        })
     }
     func dragExited() {
         var next = snapshot; next.interaction.send(.endDrag)
         commit(next, also: { self.dropTargeted = false })
         windows?.scheduleLeave()
+        // A drag the proximity monitor never saw (or one cancelled over the notch) leaves nothing behind.
+        if interaction.portal.carrying, windows?.dragIsNear != true { send(.retreat) }
     }
-    func didDrop(_ urls: [URL]) -> Bool {
-        let added = urls.compactMap { shelf.add($0) }
-        var next = snapshot; next.interaction.send(.endDrag)
-        commit(next, animation: Motion.expressive, also: {
-            self.dropTargeted = false
-            self.lastArrival = added.last
-        })
-        if !added.isEmpty { illuminate(.silver) }
-        if openedByDrag {
-            // A drop that opened the shelf hands the notch back once the file has landed.
-            returnWork?.cancel()
-            let work = DispatchWorkItem { [weak self] in
-                guard let self, self.windows?.pointerInside != true, !self.interaction.pinned else { return }
-                self.send(.leave)
-            }
-            returnWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
+
+    /// A drop on the notch. What it carries is read now; promised files and images arrive a moment later.
+    func receiveDrop(_ pasteboard: NSPasteboard, sequence: Int) -> Bool {
+        // AppKit can deliver one drop twice; the repeat is ignored so nothing is added twice.
+        guard sequence != lastDropSequence else { return true }
+        lastDropSequence = sequence
+        switch PortalIntake.read(pasteboard, deliver: { [weak self] incoming, failures in self?.keep(incoming, failures: failures) }) {
+        case .now: return true
+        case .later: send(.receive); return true
+        case .nothing: reject("Nothing in that drop can be kept on the shelf."); return false
         }
-        return !added.isEmpty
     }
+
+    /// Stores what a drop carried, then shows it being drawn in, or why it couldn't be kept. The
+    /// animation only starts once the shelf has actually stored the items.
+    func keep(_ incoming: [ShelfIncoming], failures: [String] = []) {
+        let result = shelf.intake(incoming, origin: "drop")
+        let kept = !result.added.isEmpty || result.duplicates > 0
+        // Someone who has dropped something knows the portal: the one-time tip retires.
+        if kept, !preferences.portalHintSeen { preferences.portalHintSeen = true }
+        if interaction.presentation == .expanded {
+            var next = snapshot; next.interaction.send(kept ? .absorb : .rejectDrop)
+            commit(next, animation: Motion.expressive, also: { self.dropTargeted = false; self.lastArrival = result.added.last })
+            if !result.added.isEmpty { illuminate(.silver) }
+            if !kept { shelf.error = result.message ?? failures.first ?? "Nothing in that drop could be kept." }
+            if openedByDrag {
+                // A drop that opened the shelf hands the notch back once the file has landed.
+                returnWork?.cancel()
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self, self.windows?.pointerInside != true, !self.interaction.pinned else { return }
+                    self.send(.leave)
+                }
+                returnWork = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
+            }
+            return
+        }
+        guard kept else { reject(result.message ?? failures.first ?? "Nothing in that drop could be kept."); return }
+        let all = shelf.items
+        let added = result.added.compactMap { id in all.first { $0.id == id } }
+        let cargo = PortalRules.cargo(files: added.map { ($0.name, portalKind($0)) })
+        let skipped = result.refusals.count + failures.count
+        let detail = added.isEmpty ? "Already on your shelf"
+            : skipped > 0 ? "Kept \(added.count) of \(added.count + skipped) · on your shelf"
+            : "Kept on your shelf · \(all.count) \(all.count == 1 ? "item" : "items")"
+        // What can be done with it, offered in the result itself: the item's two most useful actions,
+        // or Merge PDFs for several PDFs dropped together.
+        let contexts = added.map { ContentInspector.context(for: $0, shelf: shelf) }
+        let actions = contexts.count == 1 ? ActionRegistry.primary(for: contexts[0])
+            : ActionRegistry.actions(for: ContentClassifier.collection(contexts.map(\.kind)))
+        let summary = PortalResult(kept: true, title: cargo?.title ?? portalCargo?.title ?? "Shelf", detail: detail,
+                                   previews: added.prefix(3).map(portalPreview), items: added.map(\.id), actions: actions)
+        var next = snapshot; next.interaction.send(.absorb)
+        commit(next, also: {
+            self.dropTargeted = false; self.lastArrival = result.added.last
+            self.portalResult = summary
+            if !added.isEmpty { self.portalPulse = summary.id }
+        })
+        illuminate(.silver)
+        // Long enough to reach for an action; the pointer resting on the result keeps it longer.
+        schedulePortalSettle(after: actions.isEmpty ? 1.6 : 4.5)
+    }
+
+    private func reject(_ message: String) {
+        var next = snapshot; next.interaction.send(.rejectDrop)
+        if next.interaction.presentation == .expanded {
+            shelf.error = message
+            commit(next, also: { self.dropTargeted = false })
+            return
+        }
+        commit(next, also: {
+            self.dropTargeted = false
+            self.portalResult = PortalResult(kept: false, title: "Couldn't keep that", detail: message, previews: [])
+        })
+        illuminate(.amber)
+        schedulePortalSettle(after: 2.8)
+    }
+
+    /// Hands the notch back after a drop's result. Someone reading it keeps it a little longer.
+    private func schedulePortalSettle(after delay: TimeInterval, extensions: Int = 0) {
+        portalWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, [.receiving, .absorbing, .failed].contains(self.interaction.portal) else { return }
+            if self.windows?.pointerInside == true, extensions < 4 {
+                self.schedulePortalSettle(after: 1, extensions: extensions + 1); return
+            }
+            var next = self.snapshot; next.interaction.send(.settlePortal)
+            self.commit(next, also: { self.portalResult = nil; self.portalCargo = nil })
+        }
+        portalWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func portalKind(_ item: ShelfFile) -> PortalContentKind {
+        switch item.kind {
+        case .text: .text
+        case .link: .link
+        case .reference, .copy: shelf.resolve(item).map(PortalIntake.kind(of:)) ?? .file
+        }
+    }
+
+    private func portalPreview(_ item: ShelfFile) -> PortalPreview {
+        switch item.kind {
+        case .text: PortalPreview(id: item.id, icon: nil, symbol: "text.alignleft")
+        case .link: PortalPreview(id: item.id, icon: nil, symbol: "link")
+        case .reference, .copy:
+            PortalPreview(id: item.id, icon: shelf.resolve(item).map { NSWorkspace.shared.icon(forFile: $0.path) }, symbol: "doc")
+        }
+    }
+
     func removeFromShelf(_ item: ShelfFile) { shelf.remove(item); reflow() }
+    func clearShelf() { shelf.clear(); reflow() }
     func undoShelfRemoval() { shelf.undo(); reflow() }
     func chooseShelfFiles() { shelf.chooseFiles(); reflow() }
+    func copyShelfItem(_ item: ShelfFile) { shelf.copyToPasteboard(item); illuminate(.silver) }
+    func quickLook(_ item: ShelfFile) {
+        guard shelf.prepareQuickLook(item) else { return }
+        windows?.showQuickLook()
+    }
+
+    // MARK: Agent heartbeat and Mission Complete
+
+    /// The band's agent pulse, from what the sessions themselves reported.
+    var agentPulse: AgentPulse? { AgentPulseRules.pulse(for: agentRecords, now: Date()) }
+    /// When an agent last reported a change, so the pulse moves for a fixed time after real news only.
+    @Published private(set) var agentPulseChanged = Date.distantPast
+    private var agentRecords: [ActivityRecord] { queue.records.filter { $0.event.agent != nil && $0.dismissedAt == nil } }
+    private var pulseWork: DispatchWorkItem?
+    /// When each session's current turn began (its prompt was submitted), to state how long it worked.
+    private var turnStarted: [String: Date] = [:]
+    let completionPolicy = CompletionPolicy()
+
+    /// A celebration in the notch: one finish, or several that arrived together.
+    struct Celebration: Equatable {
+        let id = UUID()
+        var lead: String
+        var batch: [Completion]
+        let since: Date
+        var title: String
+        var detail: String
+    }
+    @Published private(set) var celebration: Celebration?
+
+    private func trackAgent(_ event: ActivityEvent, prior: ActivityEvent?) {
+        guard let agent = event.agent else { return }
+        let restarted = [AgentState.idle, .starting, .completed, .failed, .waitingForUser, .disconnected]
+        if agent.state == .working, prior?.agent?.state.map(restarted.contains) ?? true { turnStarted[event.key] = event.timestamp }
+        if event.lifecycle == .cancelled { turnStarted[event.key] = nil }
+        if prior?.agent?.state != agent.state || prior?.agent?.tool != agent.tool { agentPulseChanged = Date() }
+        refreshPulse()
+    }
+
+    /// A finish's mark and a silent session change with time alone; wake once at the next such moment.
+    private func refreshPulse() {
+        pulseWork?.cancel()
+        let now = Date()
+        let boundaries = agentRecords.compactMap { record -> Date? in
+            let at = record.event.timestamp.addingTimeInterval(record.event.lifecycle.terminal
+                ? AgentPulseRules.afterglow + 0.1 : AgentPulseRules.staleAfter + 0.1)
+            return at > now ? at : nil
+        }
+        guard let next = boundaries.min() else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.objectWillChange.send(); self?.reflow(); self?.refreshPulse()
+        }
+        pulseWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + next.timeIntervalSince(now), execute: work)
+    }
+
+    /// Finished work, with only what's known: its source, and how long an agent's turn ran when it was
+    /// seen from prompt to finish. Downloads report their size from the file itself.
+    private func completion(for record: ActivityRecord) -> Completion? {
+        let event = record.event
+        guard event.lifecycle == .completed else { return nil }
+        let source: Completion.Source = switch event.kind {
+        case .agent: .agent
+        case .ci: .ci
+        case .build: .build
+        case .deploy: .deploy
+        case .download: .download
+        case .timer: .timer
+        case .task, .meeting, .system: event.source == "timer" ? .timer : .other
+        }
+        let elapsed = event.agent != nil ? turnStarted[record.id].map { event.timestamp.timeIntervalSince($0) } : nil
+        let size = event.kind == .download
+            ? event.actionURL.flatMap(URL.init(string:)).flatMap { try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize }.map(Int64.init) : nil
+        return Completion(id: record.id, source: source, title: event.title, elapsed: elapsed, size: size, at: event.timestamp)
+    }
+
+    private func celebrationTitle(_ record: ActivityRecord) -> String {
+        let event = record.event
+        switch event.kind {
+        case .ci: return "\(event.title) passed"
+        case .build: return "\(event.title) succeeded"
+        case .deploy: return "\(event.title) deployed"
+        default: return event.title
+        }
+    }
+
+    private func celebrationDetail(_ record: ActivityRecord, _ completion: Completion) -> String {
+        let event = record.event
+        var parts: [String] = []
+        if event.kind == .ci { parts.append("All checks passed") }
+        if let place = event.agent?.repository ?? event.project { parts.append(place) }
+        if let branch = event.branch { parts.append(branch) }
+        if let elapsed = completion.elapsed {
+            parts.append("worked " + Duration.seconds(elapsed).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .abbreviated, maximumUnitCount: 2)))
+        }
+        if let size = completion.size { parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// A key was pressed in the last moment and a half: time since the last key event only, never which key.
+    static var typingNow: Bool { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown) < 1.5 }
+
+    // MARK: Notch Actions
+
+    /// What the action surface is about: one shelf item, or several dropped together.
+    @Published private(set) var actionItemIDs: [UUID] = []
+    /// Worked out once when the surface opens, so views never touch the disk to draw it.
+    @Published private(set) var actionContext: ContentContext?
+    @Published private(set) var actionRun = ActionRun()
+    /// Shelf items the last action made; Undo removes them and their files.
+    @Published private(set) var actionCreated: [UUID] = []
+    private var actionTask: Task<Void, Never>?
+
+    var actionItems: [ShelfFile] {
+        let all = shelf.items
+        return actionItemIDs.compactMap { id in all.first { $0.id == id } }
+    }
+
+    /// Opens the actions for shelf items in the same surface, optionally starting one straight away.
+    func openActions(_ ids: [UUID], then action: ContentAction? = nil) {
+        if ids != actionItemIDs { actionTask?.cancel(); actionTask = nil; actionRun = ActionRun(); actionCreated = [] }
+        actionItemIDs = ids
+        let items = actionItems
+        if items.count == 1 {
+            actionContext = ContentInspector.context(for: items[0], shelf: shelf)
+        } else if items.count > 1 {
+            let kinds = items.map { ContentInspector.context(for: $0, shelf: shelf).kind }
+            actionContext = ContentClassifier.collection(kinds)
+        } else {
+            actionContext = nil
+        }
+        portalWork?.cancel()
+        var next = snapshot; next.interaction.send(.expand); next.route = .actions
+        commit(next, also: { self.portalResult = nil; if case .capture = self.glance { self.glance = .summary } })
+        windows?.focus()
+        if let action { perform(action) }
+    }
+
+    func perform(_ action: ContentAction) {
+        let items = actionItems
+        guard let first = items.first, let context = actionContext, ActionRegistry.actions(for: context).contains(action) else { return }
+        // Opening something elsewhere isn't a run with a result.
+        switch action {
+        case .quickLook: quickLook(first); return
+        case .open: shelf.open(first); return
+        case .reveal: shelf.reveal(first); return
+        case .annotate: annotateFile(first); return
+        default: break
+        }
+        guard let token = actionRun.start(action) else { return }
+        actionCreated = []
+        let text = textContent(of: first)
+        switch action {
+        case .copy:
+            shelf.copyToPasteboard(first)
+            actionRun.finish(.done("Copied to the clipboard"), token: token); reflow(); return
+        case .createNote:
+            guard let text, !context.sensitive, let store = self.context else {
+                actionRun.fail("There's no text to keep as a note.", token: token); reflow(); return
+            }
+            store.insert(Note(text: text)); save()
+            actionRun.finish(.done("Saved as a note in Tools › Notes"), token: token); reflow(); return
+        default: break
+        }
+        reflow()
+        let urls = items.compactMap { shelf.resolve($0) }
+        let link = first.linkURL
+        actionTask = Task { [weak self] in
+            do {
+                let output = try await Self.execute(action, kind: context.kind, urls: urls, link: link, text: text) { value in
+                    Task { @MainActor in self?.actionRun.progress(value, token: token) }
+                }
+                self?.finishAction(output, token: token)
+            } catch is CancellationError {
+            } catch {
+                guard let self else { return }
+                self.actionRun.fail(error.localizedDescription, token: token); self.reflow()
+            }
+        }
+    }
+
+    private nonisolated static func execute(_ action: ContentAction, kind: ContentKind, urls: [URL], link: URL?, text: String?,
+                                            progress: @escaping ActionExecutor.Progress) async throws -> ActionExecutor.Output {
+        switch action {
+        case .mergePDFs:
+            return try await ActionExecutor.merge(urls, progress: progress)
+        case .linkPreview:
+            guard let link else { throw ActionExecutor.Failure.unsupported }
+            return try await ActionExecutor.linkTitle(link)
+        case .pdfText, .exportPages, .splitPages:
+            guard let url = urls.first else { throw ActionExecutor.Failure.unreadable }
+            return try await ActionExecutor.pdf(action, url: url, progress: progress)
+        case .mediaInfo, .extractFrame, .convertM4A, .compressVideo:
+            guard let url = urls.first else { throw ActionExecutor.Failure.unreadable }
+            return try await ActionExecutor.media(action, url: url, progress: progress)
+        case .extractText, .removeBackground, .convertPNG, .convertJPEG, .convertHEIC, .resizeHalf, .compress:
+            guard let url = urls.first else { throw ActionExecutor.Failure.unreadable }
+            return try await ActionExecutor.image(action, url: url)
+        case .uppercase, .lowercase, .titleCase, .cleanWhitespace, .wordCount, .detectLanguage:
+            guard let text else { throw ActionExecutor.Failure.noText }
+            return try ActionExecutor.text(action, text)
+        default:
+            throw ActionExecutor.Failure.unsupported
+        }
+    }
+
+    /// New files join the shelf as copies; a run that was cancelled or replaced meanwhile leaves nothing.
+    private func finishAction(_ output: ActionExecutor.Output, token: Int) {
+        guard actionRun.token == token, actionRun.isProcessing else { output.files.forEach(ShelfService.deleteCopy); return }
+        if !output.files.isEmpty {
+            let result = shelf.intake(output.files.map(ShelfIncoming.copy), origin: "action")
+            actionCreated = result.added
+            guard !result.added.isEmpty else {
+                actionRun.fail(result.message ?? "The result couldn't be added to the shelf.", token: token); reflow(); return
+            }
+        }
+        actionRun.finish(output.outcome, token: token)
+        illuminate(.green)
+        reflow()
+    }
+
+    func cancelAction() { actionTask?.cancel(); actionTask = nil; actionRun.cancel(); reflow() }
+    func dismissActionResult() { actionRun.reset(); actionCreated = []; reflow() }
+
+    /// Removes what the last action created, files and all.
+    func undoAction() {
+        shelf.discardCreated(actionCreated)
+        actionCreated = []; actionRun.reset(); reflow()
+    }
+
+    func copyActionText() {
+        guard case .completed(_, .text(let text)) = actionRun.phase, !text.isEmpty else { return }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+        illuminate(.silver)
+    }
+
+    func keepActionText(asNote: Bool) {
+        guard case .completed(_, .text(let text)) = actionRun.phase, !text.isEmpty else { return }
+        if asNote, let context {
+            context.insert(Note(text: text)); save()
+        } else {
+            let result = shelf.intake([.text(text, rich: nil)], origin: "action")
+            if result.added.isEmpty && result.duplicates == 0 { message = result.message; return }
+        }
+        illuminate(.green)
+    }
+
+    /// The text an item holds: its own text, or a small text file's contents.
+    private func textContent(of item: ShelfFile) -> String? {
+        switch item.kind {
+        case .text: item.text
+        case .link: item.text
+        case .reference, .copy: shelf.resolve(item).flatMap(ContentInspector.text(of:))
+        }
+    }
+
+    /// Opens an image file in the annotation editor used for screenshots.
+    private func annotateFile(_ item: ShelfFile) {
+        guard let url = shelf.resolve(item) else { message = "That file is no longer available."; return }
+        Task { [weak self] in
+            let described = await Task.detached(priority: .userInitiated) { ScreenshotService.describe(url) }.value
+            guard let self, let described else { self?.message = "That image couldn't be read."; return }
+            self.recognition?.cancel()
+            self.capture = Capture(url: url, taken: item.addedAt, pixelSize: described.size,
+                                   thumbnail: described.thumbnail.map { NSImage(cgImage: $0, size: .zero) })
+            self.captureText = .idle; self.annotatedCopy = nil; self.annotations = AnnotationDocument()
+            self.annotateCapture()
+        }
+    }
+
+    // MARK: Screenshot Magnet
+
+    let screenshots = ScreenshotService()
+    /// The latest screenshot. Memory only; the file stays where macOS saved it.
+    @Published private(set) var capture: Capture?
+    enum CaptureText: Equatable { case idle, reading, done(String), failed(String) }
+    @Published private(set) var captureText: CaptureText = .idle
+    @Published var annotations = AnnotationDocument()
+    @Published var annotationTool: AnnotationTool = .arrow
+    /// Where the last annotated copy was saved.
+    @Published private(set) var annotatedCopy: URL?
+    @Published private(set) var captureBusy = false
+    private var recognition: Task<Void, Never>?
+    private var captureWork: DispatchWorkItem?
+    private var captureWaiting = false
+
+    var captureGlanceShowing: Bool { if case .capture = glance { return true }; return false }
+
+    func captureArrived(_ capture: Capture) {
+        // With private details hidden, a screenshot is exactly the kind of thing not to show.
+        guard !preferences.privacy else { return }
+        recognition?.cancel(); recognition = nil
+        self.capture = capture
+        captureText = .idle; annotatedCopy = nil; annotations = AnnotationDocument()
+        if preferences.quietMode { illuminate(.silver); return }
+        if captureMustWait { captureWaiting = true; illuminate(.silver); return }
+        presentCapture()
+    }
+
+    /// A drag, an editor, an open workspace or another glance keeps the surface; the screenshot
+    /// waits and appears when it's free, if it's still recent.
+    private var captureMustWait: Bool {
+        if interaction.portal != .closed || interaction.editing || interaction.dragging || interaction.presentation == .expanded { return true }
+        if case .notification = glance { return true }
+        return false
+    }
+
+    private func presentCapture() {
+        guard let capture else { return }
+        captureWaiting = false
+        var next = snapshot
+        if next.interaction.presentation == .collapsed { next.interaction.send(.attention) }
+        commit(next, also: { self.glance = .capture(capture.id) })
+        illuminate(.silver)
+        scheduleCaptureDismiss()
+    }
+
+    private func resumeCapture() {
+        guard captureWaiting, let capture, Date().timeIntervalSince(capture.taken) < 90 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self, self.captureWaiting, !self.captureMustWait, self.glance == .summary else { return }
+            self.presentCapture()
+        }
+    }
+
+    /// The preview leaves on its own after a while, but never from under the pointer.
+    private func scheduleCaptureDismiss(after delay: TimeInterval = 8) {
+        captureWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.captureGlanceShowing else { return }
+            if self.windows?.pointerInside == true { self.scheduleCaptureDismiss(after: 2); return }
+            self.dismissCapture()
+        }
+        captureWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func dismissCapture() {
+        captureWork?.cancel()
+        guard captureGlanceShowing else { return }
+        var next = snapshot
+        if next.interaction.presentation == .preview, windows?.pointerInside != true { next.interaction.send(.leave) }
+        commit(next, also: { self.glance = .summary })
+    }
+
+    func copyCapture() {
+        guard let capture, let data = ImagePasteboard.pngData(of: capture.url) else {
+            message = "That screenshot is no longer where macOS saved it."; return
+        }
+        ImagePasteboard.copy(png: data, file: capture.url)
+        lockHover(); illuminate(.silver)
+    }
+
+    func saveCaptureToShelf() {
+        guard let capture else { return }
+        let result = shelf.intake([.reference(capture.url)], origin: "screenshot")
+        if result.added.isEmpty && result.duplicates == 0 { message = result.message ?? "The screenshot couldn't be added to the shelf." }
+        else { illuminate(.silver) }
+        reflow()
+    }
+
+    func revealCapture() {
+        guard let capture else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([capture.url])
+    }
+
+    func quickLookCapture() {
+        guard let capture else { return }
+        captureWork?.cancel()
+        shelf.preview.urls = [capture.url]
+        windows?.showQuickLook()
+    }
+
+    /// Reads the screenshot's text on this Mac, in the same surface. Leaving keeps the result.
+    func readCaptureText() {
+        guard let capture else { return }
+        captureWork?.cancel()
+        var next = snapshot; next.interaction.send(.expand); next.route = .capture(.text)
+        commit(next, also: { self.glance = .summary })
+        windows?.focus()
+        switch captureText {
+        case .reading, .done: return
+        case .idle, .failed: break
+        }
+        captureText = .reading
+        recognition = Task { [weak self] in
+            do {
+                let text = try await TextRecognition.text(in: capture.url)
+                guard !Task.isCancelled, let self, self.capture?.id == capture.id else { return }
+                self.captureText = .done(text); self.reflow()
+            } catch is CancellationError {
+            } catch {
+                guard let self, self.capture?.id == capture.id else { return }
+                self.captureText = .failed(error.localizedDescription); self.reflow()
+            }
+        }
+    }
+
+    func cancelCaptureText() {
+        recognition?.cancel(); recognition = nil
+        captureText = .idle; reflow()
+    }
+
+    func copyCaptureText() {
+        guard case .done(let text) = captureText, !text.isEmpty else { return }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+        illuminate(.silver)
+    }
+
+    func saveCaptureTextToShelf() {
+        guard case .done(let text) = captureText else { return }
+        let result = shelf.intake([.text(text, rich: nil)], origin: "screenshot")
+        if result.added.isEmpty && result.duplicates == 0 { message = result.message } else { illuminate(.silver) }
+    }
+
+    func annotateCapture() {
+        guard capture != nil else { return }
+        captureWork?.cancel()
+        var next = snapshot; next.interaction.send(.expand); next.route = .capture(.annotate)
+        commit(next, also: { self.glance = .summary })
+        windows?.focus()
+    }
+
+    func changeAnnotations(_ change: (inout AnnotationDocument) -> Void) {
+        change(&annotations); annotatedCopy = nil
+    }
+
+    /// Saves an annotated copy next to the original, off the main thread. The original isn't touched.
+    func saveAnnotatedCopy() {
+        guard let capture, !annotations.items.isEmpty, !captureBusy else { return }
+        captureBusy = true
+        let url = capture.url, items = annotations.items
+        Task { [weak self] in
+            let saved = await Task.detached(priority: .userInitiated) { Result { try AnnotationRenderer.saveCopy(of: url, items) } }.value
+            guard let self else { return }
+            self.captureBusy = false
+            switch saved {
+            case .success(let copy):
+                self.annotatedCopy = copy; self.illuminate(.green)
+                // Annotating a shelf copy saves beside it, inside the shelf's folder: it joins the shelf
+                // rather than being swept as an orphan at the next launch.
+                if copy.standardizedFileURL.path.hasPrefix(ShelfService.folder.standardizedFileURL.path + "/") {
+                    self.shelf.intake([.copy(copy)], origin: "action")
+                }
+            case .failure(let error): self.message = error.localizedDescription
+            }
+            self.reflow()
+        }
+    }
+
+    /// Copies the annotated image without saving a file.
+    func copyAnnotated() {
+        guard let capture, !captureBusy else { return }
+        captureBusy = true
+        let url = capture.url, items = annotations.items
+        Task { [weak self] in
+            let data = await Task.detached(priority: .userInitiated) { try? AnnotationRenderer.png(AnnotationRenderer.render(url, items)) }.value
+            guard let self else { return }
+            self.captureBusy = false
+            if let data { ImagePasteboard.copy(png: data, file: nil); self.illuminate(.silver) }
+            else { self.message = AnnotationRenderer.Failure.unreadable.localizedDescription }
+        }
+    }
 
     // MARK: Notes and to-dos
 
@@ -941,6 +1784,7 @@ struct CommandItem: Identifiable {
             CommandItem(id: "music", title: "Music", symbol: Feature.music.symbol, hint: "⌘2") { [weak self] in self?.navigate(.music) },
             CommandItem(id: "activity", title: "Activity", symbol: Feature.activity.symbol, hint: "⌘1") { [weak self] in self?.navigate(.activity(detail: nil)) },
             CommandItem(id: "history", title: "History", symbol: Feature.history.symbol, hint: "⌘5") { [weak self] in self?.navigate(.history(detail: nil)) },
+            CommandItem(id: "timeline", title: "Time Travel", symbol: "clock.arrow.circlepath", hint: "⌘Y") { [weak self] in self?.openTimeline() },
         ]
         items += Tool.allCases.map { tool in
             CommandItem(id: "tool-\(tool.rawValue)", title: tool.title, symbol: tool.symbol, hint: "Tools") { [weak self] in self?.navigate(.tools(tool)) }
@@ -980,7 +1824,7 @@ struct CommandItem: Identifiable {
     }
 
     func stop() {
-        clock.run(false); providers.stopAll(); approvals.withdraw()
+        clock.run(false); providers.stopAll(); approvals.withdraw(); screenshots.stop(); recognition?.cancel(); sound.stop()
         media.stop(); camera.stop(); backdrop.stop(); battery.stop()
     }
 }

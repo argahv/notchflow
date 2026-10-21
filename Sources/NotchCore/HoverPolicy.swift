@@ -63,9 +63,52 @@ public enum HoverPolicy {
         public var hovered: Bool
         public var locked: Bool
         public var allowSplit: Bool
-        public init(hovered: Bool = false, locked: Bool = false, allowSplit: Bool = true) {
-            self.hovered = hovered; self.locked = locked; self.allowSplit = allowSplit
+        /// The candidate the person pinned to stay on screen, if it's still live.
+        public var pinned: String?
+        public init(hovered: Bool = false, locked: Bool = false, allowSplit: Bool = true, pinned: String? = nil) {
+            self.hovered = hovered; self.locked = locked; self.allowSplit = allowSplit; self.pinned = pinned
         }
+    }
+
+    public enum Side: Sendable { case primary, secondary }
+
+    /// Moves one side of what's shown to the next candidate of the same kind (work for work, ambient for
+    /// ambient) that still pairs with the other side. Order is the same ranking `choose` uses.
+    public static func cycle(_ candidates: [HoverCandidate], current: HoverChoice, side: Side, step: Int) -> HoverChoice {
+        guard let shown = side == .primary ? current.primary : current.secondary else { return current }
+        let other = side == .primary ? current.secondary : current.primary
+        let options = ranked(candidates).filter { candidate in
+            candidate.family.isAmbient == shown.family.isAmbient
+                && (other.map { candidate.id != $0.id && pairs(candidate, $0) } ?? true)
+        }
+        guard options.count > 1, let index = options.firstIndex(where: { $0.id == shown.id }) else { return current }
+        let next = options[((index + step) % options.count + options.count) % options.count]
+        var choice = current
+        if side == .primary { choice.primary = next } else { choice.secondary = next }
+        choice.others = others(in: ranked(candidates), primary: choice.primary, secondary: choice.secondary)
+        return choice
+    }
+
+    /// How many alternatives one side has, so the view offers cycling only when there's somewhere to go.
+    public static func alternatives(_ candidates: [HoverCandidate], current: HoverChoice, side: Side) -> Int {
+        guard let shown = side == .primary ? current.primary : current.secondary else { return 0 }
+        let other = side == .primary ? current.secondary : current.primary
+        return candidates.filter { candidate in
+            candidate.family.isAmbient == shown.family.isAmbient
+                && (other.map { candidate.id != $0.id && pairs(candidate, $0) } ?? true)
+        }.count - 1
+    }
+
+    static func ranked(_ candidates: [HoverCandidate]) -> [HoverCandidate] {
+        candidates.sorted {
+            if $0.tier != $1.tier { return $0.tier < $1.tier }
+            if $0.updated != $1.updated { return $0.updated > $1.updated }
+            return $0.id < $1.id
+        }
+    }
+
+    static func others(in ranked: [HoverCandidate], primary: HoverCandidate?, secondary: HoverCandidate?) -> Int {
+        ranked.filter { !$0.family.isAmbient && $0.id != primary?.id && $0.id != secondary?.id }.count
     }
 
     public static func choose(_ candidates: [HoverCandidate], current: HoverChoice?, situation: Situation) -> HoverChoice {
@@ -104,8 +147,23 @@ public enum HoverPolicy {
                 }
             }
         }
-        let others = ranked.filter { !$0.family.isAmbient && $0.id != primary.id && $0.id != secondary?.id }.count
-        return HoverChoice(primary: primary, secondary: secondary, others: others)
+        var choice = HoverChoice(primary: primary, secondary: secondary,
+                                 others: others(in: ranked, primary: primary, secondary: secondary))
+        // A pinned item stays on screen: beside the lead when they pair, as the lead otherwise, but never
+        // in place of a request or a failure, which keep the surface until handled.
+        if let id = situation.pinned, let pin = ranked.first(where: { $0.id == id }),
+           choice.primary?.id != id, choice.secondary?.id != id {
+            if primary.tier.isCritical {
+                if situation.allowSplit, pairs(primary, pin) { choice.secondary = pin }
+            } else {
+                // The pin stays, with the most important item it pairs with beside it; work leads.
+                let partner = situation.allowSplit ? ranked.first { $0.id != pin.id && pairs(pin, $0) } : nil
+                if pin.family.isAmbient, let partner { choice.primary = partner; choice.secondary = pin }
+                else { choice.primary = pin; choice.secondary = partner }
+            }
+            choice.others = others(in: ranked, primary: choice.primary, secondary: choice.secondary)
+        }
+        return choice
     }
 
     /// Two things share the surface only when one is ambient (music, a timer) and the other is work

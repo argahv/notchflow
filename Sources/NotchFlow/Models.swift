@@ -19,6 +19,22 @@ import SwiftData
     var name: String = ""
     var bookmark: Data = Data()
     var addedAt: Date = Date()
+    // Added with the notch portal. Every field has a default, so stores from earlier versions open in
+    // place and their items read as file references.
+    /// See `ShelfKind`: the person's file by reference, a copy NotchFlow keeps, text, or a link.
+    var kindRaw: String = "reference"
+    /// Text, or a link's address.
+    var text: String?
+    /// The rich-text version of dropped text, when its source offered one.
+    var richText: Data?
+    /// A copy's path, relative to the shelf folder.
+    var copyPath: String?
+    var byteCount: Int?
+    var contentType: String?
+    /// How it arrived: `drop` or `picker`.
+    var origin: String?
+    /// Identity of text and links, to refuse a second copy of the same thing.
+    var contentKey: String?
     init(name: String, bookmark: Data) { self.name = name; self.bookmark = bookmark }
 }
 
@@ -70,10 +86,22 @@ struct QuickApp: Identifiable, Equatable {
     @Published var lowBatteryAlerts: Bool { didSet { save("lowBatteryAlerts", lowBatteryAlerts) } }
     /// The app in front reorders the stack (never opens anything). See `ContextRules`.
     @Published var contextAware: Bool { didSet { save("contextAware", contextAware) } }
+    /// The notch reacts to a drag heading for it and keeps what's dropped on the shelf. Off, a drop
+    /// on the notch opens the shelf instead.
+    @Published var portalEnabled: Bool { didSet { save("portalEnabled", portalEnabled) } }
+    /// Off by default: new screenshots appear in the notch. Watches the folder macOS saves them to.
+    @Published var screenshotsEnabled: Bool { didSet { save("screenshotsEnabled", screenshotsEnabled) } }
+    /// The notch briefly shows a new sound output (AirPods connecting, a display's speakers) with its volume.
+    @Published var soundIslandEnabled: Bool { didSet { save("soundIslandEnabled", soundIslandEnabled) } }
+    /// The one-time portal tip was dismissed, or a drop has already been made.
+    @Published var portalHintSeen: Bool { didSet { save("portalHintSeen", portalHintSeen) } }
+    /// NotchFlow's own motion reduced to short fades, without changing the system setting. Same switch
+    /// the Reduce Motion path already reads.
+    @Published var calmMotion: Bool { didSet { save("NotchFlowReduceMotion", calmMotion) } }
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        defaults.register(defaults: ["overlayEnabled": true, "simulatedNotch": true,
+        defaults.register(defaults: ["overlayEnabled": true, "simulatedNotch": true, "portalEnabled": true, "soundIslandEnabled": true,
                                     "bridgeEnabled": true, "notchWidth": 190.0, "hoverDelay": 0.12,
                                     "showBattery": false, "historyRetentionDays": 30, "approvalWait": 25, "clipboardRetentionHours": 24, "contextAware": true,
                                     "quickApps": ["com.apple.Terminal", "com.microsoft.VSCode", "com.apple.finder", "com.apple.Safari", "com.apple.Notes"]])
@@ -102,6 +130,11 @@ struct QuickApp: Identifiable, Equatable {
         meetingsEnabled = defaults.bool(forKey: "meetingsEnabled")
         lowBatteryAlerts = defaults.bool(forKey: "lowBatteryAlerts")
         contextAware = defaults.bool(forKey: "contextAware")
+        portalEnabled = defaults.bool(forKey: "portalEnabled")
+        screenshotsEnabled = defaults.bool(forKey: "screenshotsEnabled")
+        soundIslandEnabled = defaults.bool(forKey: "soundIslandEnabled")
+        portalHintSeen = defaults.bool(forKey: "portalHintSeen")
+        calmMotion = defaults.bool(forKey: "NotchFlowReduceMotion")
     }
 
     var modeSettings: ModeSettings {
@@ -119,7 +152,13 @@ struct QuickApp: Identifiable, Equatable {
 
 enum AppFiles {
     static var root: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        #if DEBUG
+        // Scripted QA points a Debug build at a throwaway folder, so test drops never reach the real shelf.
+        if let override = ProcessInfo.processInfo.environment["NOTCHFLOW_APP_SUPPORT"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        #endif
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("NotchFlow", isDirectory: true)
     }
     static func prepare() throws {

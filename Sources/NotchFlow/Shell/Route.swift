@@ -57,6 +57,9 @@ enum Tool: String, CaseIterable, Identifiable {
     }
 }
 
+/// What a screenshot's surface is doing after its preview: reading its text, or annotating it.
+enum CaptureMode: Hashable { case text, annotate }
+
 /// Where the workspace is. Sub-routes stay inside their feature's view so they animate in place;
 /// switching features replaces the content while the surface morphs between their sizes.
 enum Route: Hashable {
@@ -66,6 +69,12 @@ enum Route: Hashable {
     case tools(Tool?)
     case history(detail: String?)
     case command
+    /// The latest screenshot, opened from its preview into one of its actions.
+    case capture(CaptureMode)
+    /// Actions on what the person dropped or picked from the shelf (the model holds which items).
+    case actions
+    /// Time Travel: recent finished work and kept content, one moment at a time.
+    case timeline
 
     static func root(_ feature: Feature) -> Route {
         switch feature {
@@ -83,16 +92,26 @@ enum Route: Hashable {
         case .shelf: .shelf
         case .tools: .tools
         case .history: .history
-        case .command: nil
+        case .command, .capture, .actions, .timeline: nil
         }
     }
     /// Identity of the content view; sub-routes share their feature's view.
-    var surface: String { feature?.rawValue ?? "command" }
+    var surface: String {
+        switch self {
+        case .capture: "capture"
+        case .actions: "actions"
+        case .timeline: "timeline"
+        default: feature?.rawValue ?? "command"
+        }
+    }
     var parent: Route? {
         switch self {
         case .activity(.some): .activity(detail: nil)
         case .tools(.some): .tools(nil)
         case .history(.some): .history(detail: nil)
+        // What was acted on lives on the shelf; going back lands there.
+        case .actions: .shelf
+        case .timeline: .history(detail: nil)
         default: nil
         }
     }
@@ -102,6 +121,10 @@ enum Route: Hashable {
 enum GlanceSubject: Equatable {
     case summary
     case notification(String)
+    /// A screenshot that just arrived.
+    case capture(UUID)
+    /// Sound moved to another output.
+    case sound
 }
 
 /// The drawn silhouette. Size, ears and corners animate together in one transaction.

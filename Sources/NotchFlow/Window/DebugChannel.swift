@@ -76,6 +76,104 @@ import AppKit
             }
         case "clearActivities":
             model.clearHistory(); model.reflow()
+        case "portal":
+            // "portal:near:<kind>:<count>", "portal:close:<kind>:<count>", "portal:enter", "portal:exit",
+            // "portal:away". Drives the same calls the drag monitor and the drop target make.
+            let parts = argument.split(separator: ":").map(String.init)
+            let cargo = parts.count > 1 ? PortalCargo(kind: PortalContentKind(rawValue: parts[1]) ?? .file,
+                                                      count: parts.count > 2 ? Int(parts[2]) ?? 1 : 1) : nil
+            switch parts.first {
+            case "near": model.dragProximity(.near, cargo: cargo)
+            case "close": model.dragProximity(.close, cargo: cargo)
+            case "enter": model.dragEntered(cargo ?? model.portalCargo)
+            case "exit": model.dragExited()
+            default: model.dragProximity(.away, cargo: nil)
+            }
+        case "drop":
+            // "drop:file:<path>|<path>", "drop:text:<text>", "drop:link:<url>": the drop path after the pasteboard.
+            let parts = argument.split(separator: ":", maxSplits: 1).map(String.init)
+            let value = parts.count > 1 ? parts[1] : ""
+            switch parts.first {
+            case "file": model.keep(value.split(separator: "|").map { .reference(URL(fileURLWithPath: String($0))) })
+            case "text": model.keep([.text(value.replacingOccurrences(of: "\\n", with: "\n"), rich: nil)])
+            case "link": model.keep(ShelfPolicy.link(from: value).map { [.link($0)] } ?? [])
+            default: break
+            }
+        case "pasteboard":
+            // "pasteboard:<name>": a named pasteboard another process filled, read exactly as a drop is.
+            guard !argument.isEmpty else { break }
+            _ = model.receiveDrop(NSPasteboard(name: NSPasteboard.Name(argument)), sequence: Int.random(in: 1...Int.max))
+        case "sound":
+            // "sound:connected:<name>" or "sound:switched:<name>": the glance a real output change would show.
+            let parts = argument.split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { break }
+            model.soundChanged(parts[0] == "connected" ? .connected(name: parts[1]) : .switched(name: parts[1], bluetooth: false))
+        case "timeline":
+            // "timeline:open", "timeline:move:<steps>" (positive is earlier), "timeline:now".
+            let parts = argument.split(separator: ":").map(String.init)
+            switch parts.first {
+            case "open": model.openTimeline()
+            case "move": model.moveTimeline(Int(parts.count > 1 ? parts[1] : "1") ?? 1)
+            case "now": model.timelineToPresent()
+            default: break
+            }
+        case "split":
+            // "split:next:primary|secondary", "split:prev:…", "split:pin:<hover id>" (music, timer, or an activity id).
+            let parts = argument.split(separator: ":", maxSplits: 1).map(String.init)
+            let value = parts.count > 1 ? parts[1] : ""
+            switch parts.first {
+            case "next", "prev": model.cycleHover(value == "secondary" ? .secondary : .primary, step: parts.first == "next" ? 1 : -1)
+            case "pin": if let item = model.hoverItem(id: value) { model.toggleHoverPin(item) }
+            default: break
+            }
+        case "screenshots":
+            // "screenshots:watch" / "screenshots:stop": the watcher only, without changing the saved setting.
+            model.screenshots.configure(enabled: argument == "watch")
+        case "capture":
+            // "capture:<path>" (as if that file were just detected), "capture:text", "capture:annotate",
+            // "capture:dismiss".
+            switch argument {
+            case "text": model.readCaptureText()
+            case "annotate": model.annotateCapture()
+            case "dismiss": model.dismissCapture()
+            default: if argument.hasPrefix("/") { model.screenshots.deliver(URL(fileURLWithPath: argument), taken: Date()) }
+            }
+        case "annotate":
+            // "annotate:<tool>:x1,y1,x2,y2[:text]" with fractions of the image, or undo, redo, clear, save.
+            let parts = argument.split(separator: ":", maxSplits: 2).map(String.init)
+            switch parts.first {
+            case "undo": model.changeAnnotations { $0.undo() }
+            case "redo": model.changeAnnotations { $0.redo() }
+            case "clear": model.changeAnnotations { $0.clear() }
+            case "save": model.saveAnnotatedCopy()
+            default:
+                guard let tool = parts.first.flatMap(AnnotationTool.init(rawValue:)), parts.count > 1 else { break }
+                let n = parts[1].split(separator: ",").compactMap { Double($0) }
+                guard n.count == 4 else { break }
+                let item = Annotation(tool: tool, start: AnnotationPoint(x: n[0], y: n[1]), end: AnnotationPoint(x: n[2], y: n[3]),
+                                      text: parts.count > 2 ? parts[2] : nil)
+                model.changeAnnotations { $0.add(item) }
+            }
+        case "actions":
+            // "actions:<item name prefix>[:<action>]", or "actions:pdfs:mergePDFs" for every PDF on the shelf;
+            // "actions:cancel", "actions:undo".
+            let parts = argument.split(separator: ":").map(String.init)
+            switch parts.first {
+            case "cancel": model.cancelAction()
+            case "undo": model.undoAction()
+            case "pdfs":
+                let ids = model.shelf.items.filter { $0.name.lowercased().hasSuffix(".pdf") }.map(\.id)
+                model.openActions(ids, then: parts.count > 1 ? ContentAction(rawValue: parts[1]) : nil)
+            default:
+                guard let prefix = parts.first, let item = model.shelf.items.first(where: { $0.name.hasPrefix(prefix) }) else { break }
+                model.openActions([item.id], then: parts.count > 1 ? ContentAction(rawValue: parts[1]) : nil)
+            }
+        case "shelf":
+            switch argument {
+            case "clear": model.clearShelf()
+            case "undo": model.undoShelfRemoval()
+            default: break
+            }
         case "snapshot":
             // "snapshot:<name>" or "snapshot:<name>:light"
             let parts = argument.split(separator: ":").map(String.init)
@@ -85,8 +183,21 @@ import AppKit
         case "status":
             let lines = model.providers.statuses.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.label)" }
                 + ["route: \(model.route) · \(model.interaction.presentation)",
-                   "hover: \(model.hoverChoice.primary?.id ?? "-") + \(model.hoverChoice.secondary?.id ?? "-") +\(model.hoverChoice.others)",
+                   "hover: \(model.hoverChoice.primary?.id ?? "-") + \(model.hoverChoice.secondary?.id ?? "-") +\(model.hoverChoice.others) · pin: \(model.hoverPin ?? "-")",
                    "context: \(model.contextBoost.map(\.rawValue).sorted().joined(separator: ","))",
+                   "portal: \(model.interaction.portal.rawValue) · awareness: \(model.interaction.awareness.rawValue) · shelf: \(model.shelfCount)",
+                   "portal result: \(model.portalResult.map { "\($0.title) — \($0.detail)" } ?? "-")",
+                   "screenshots: \(model.screenshots.status)",
+                   "capture: \(model.capture.map { "\($0.id.uuidString.prefix(8)) \($0.name) \(Int($0.pixelSize.width))x\(Int($0.pixelSize.height))" } ?? "-") · glance: \(model.glance)",
+                   "capture text: \(model.captureText)",
+                   "action context: \(model.actionContext.map { "\($0.kind.rawValue) \($0.title) pages=\($0.pageCount.map(String.init) ?? "-") sensitive=\($0.sensitive)" } ?? "-")",
+                   "action: \(model.actionRun.phase) · created: \(model.actionCreated.count)",
+                   "portal actions: \(model.portalResult?.actions.map(\.rawValue).joined(separator: ",") ?? "-")",
+                   "agent pulse: \(model.agentPulse?.rawValue ?? "-")",
+                   "sound: \(model.sound.output?.name ?? "-") · volume \(model.sound.volume.map { String(format: "%.2f", $0) } ?? "-") · muted \(model.sound.muted.map(String.init) ?? "-") · bluetooth \(model.sound.bluetooth) · glance \(model.glance == .sound)",
+                   "timeline: \(model.timeline.count) · at \(model.timelineCursor.index): \(model.timelineEntry.map { "\($0.kind.rawValue) \($0.title)" } ?? "-") · actions: \(model.timelineEntry.map { model.timelineActions($0).map(\.title).joined(separator: ",") } ?? "-")",
+                   "celebration: \(model.celebration.map { "\($0.title) — \($0.detail) (\($0.batch.count))" } ?? "-")",
+                   "annotations: \(model.annotations.items.map(\.tool.rawValue).joined(separator: ",")) · saved: \(model.annotatedCopy?.lastPathComponent ?? "-")",
                    "mode: \(model.preferences.mode?.title ?? "Custom")"]
             try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)
         case "dumpHooks":

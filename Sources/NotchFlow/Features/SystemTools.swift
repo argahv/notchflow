@@ -1,5 +1,6 @@
 import Foundation
 import CoreAudio
+import AudioToolbox
 import Darwin
 
 struct AudioOutput: Identifiable, Equatable {
@@ -38,6 +39,42 @@ enum AudioDevices {
                                           UInt32(MemoryLayout<AudioDeviceID>.size), &id) == noErr
     }
 
+    /// The device's output volume, 0…1, through the HAL's virtual main volume. Nil for devices without one.
+    static func volume(of id: AudioDeviceID) -> Float? {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+                                                 mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+        guard AudioObjectHasProperty(id, &address) else { return nil }
+        var value = Float32(0), size = UInt32(MemoryLayout<Float32>.size)
+        return AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr ? value : nil
+    }
+    @discardableResult static func setVolume(_ value: Float, of id: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+                                                 mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+        var level = Float32(min(1, max(0, value)))
+        return AudioObjectSetPropertyData(id, &address, 0, nil, UInt32(MemoryLayout<Float32>.size), &level) == noErr
+    }
+    static func isMuted(_ id: AudioDeviceID) -> Bool? {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyMute,
+                                                 mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+        guard AudioObjectHasProperty(id, &address) else { return nil }
+        var value = UInt32(0), size = UInt32(MemoryLayout<UInt32>.size)
+        return AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr ? value != 0 : nil
+    }
+    @discardableResult static func setMuted(_ muted: Bool, of id: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyMute,
+                                                 mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+        var value = UInt32(muted ? 1 : 0)
+        return AudioObjectSetPropertyData(id, &address, 0, nil, UInt32(MemoryLayout<UInt32>.size), &value) == noErr
+    }
+    /// Bluetooth or Bluetooth LE, from the device's own transport type.
+    static func isBluetooth(_ id: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyTransportType,
+                                                 mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var transport = UInt32(0), size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &transport) == noErr else { return false }
+        return transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE
+    }
+
     private static func hasOutput(_ id: AudioDeviceID) -> Bool {
         var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams,
                                                  mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
@@ -52,7 +89,7 @@ enum AudioDevices {
         return AudioObjectGetPropertyData(id, &address, 0, nil, &size, &hidden) == noErr && hidden != 0
     }
 
-    private static func name(of id: AudioDeviceID) -> String? {
+    static func name(of id: AudioDeviceID) -> String? {
         var address = AudioObjectPropertyAddress(mSelector: kAudioObjectPropertyName,
                                                  mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var name: Unmanaged<CFString>?

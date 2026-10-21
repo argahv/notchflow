@@ -28,6 +28,8 @@ struct HistorySurface: View {
                             }
                         }
                         HStack {
+                            Button { model.openTimeline() } label: { Label("Time Travel", systemImage: "clock.arrow.circlepath") }
+                                .buttonStyle(PillButtonStyle()).help("Step back through recent moments · ⌘Y, or ⌥-scroll on the notch")
                             Spacer()
                             Button(confirmingClear ? "Clear all history" : "Clear history") {
                                 if confirmingClear { model.clearHistory(); confirmingClear = false }

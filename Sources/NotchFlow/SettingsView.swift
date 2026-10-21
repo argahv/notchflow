@@ -34,6 +34,10 @@ struct SettingsView: View {
             Section("Workspace") {
                 Toggle("Show notch overlay", isOn: $preferences.overlayEnabled)
                 Toggle("Simulate a notch on displays without one", isOn: $preferences.simulatedNotch)
+                Toggle(isOn: $preferences.portalEnabled) {
+                    Text("Drop anything on the notch to keep it")
+                    Text("The notch opens toward a file, image, link or text you drag to it and keeps it on the shelf. Off, dropping on the notch opens the shelf instead.")
+                }
                 Picker("Display", selection: $preferences.selectedDisplay) {
                     Text("Automatic · Prefer built-in notch").tag("")
                     ForEach(NSScreen.screens, id: \.self) { screen in
@@ -97,6 +101,10 @@ struct SettingsView: View {
                 Button("Add App…") { addQuickApp() }
             }
             Section("Appearance") {
+                Toggle(isOn: $preferences.calmMotion) {
+                    Text("Calm motion")
+                    Text("Short fades instead of springs, sweeps and pulses, without changing the system's Reduce Motion setting.")
+                }
                 Picker("Surface", selection: $preferences.visualMode) {
                     ForEach(VisualMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
@@ -110,6 +118,10 @@ struct SettingsView: View {
             }
             Section("Integrations") {
                 Toggle("Enable Music / Spotify controls", isOn: $preferences.mediaEnabled)
+                Toggle(isOn: $preferences.soundIslandEnabled) {
+                    Text("Show when sound changes output")
+                    Text("AirPods connecting or a switch to another speaker shows the device, its volume and a quick switch for a few seconds.")
+                }
                 Picker("Player", selection: $preferences.mediaPlayer) { Text("Music").tag("Music"); Text("Spotify").tag("Spotify") }
                     .disabled(!preferences.mediaEnabled)
                 Text("Automation permission is requested only when the Music tab is used. This adapter does not use private MediaRemote APIs.")
@@ -146,6 +158,13 @@ struct SettingsView: View {
                             .foregroundStyle(status.isFailure ? .orange : .secondary)
                     }
                 }
+            }
+            Section("Screenshots") {
+                Toggle(isOn: $preferences.screenshotsEnabled) {
+                    Text("Show new screenshots in the notch")
+                    Text("Copy, read the text or annotate a screenshot right after taking it. NotchFlow watches the folder macOS saves screenshots to, never moves or deletes them, and reads text on this Mac.")
+                }
+                if preferences.screenshotsEnabled { ScreenshotStatus(service: model.screenshots) }
             }
             Section("Agents") {
                 Toggle(isOn: $preferences.agentApprovals) {
@@ -308,5 +327,35 @@ enum GitHubSettings {
         guard parts.count == 2 else { return nil }
         let candidate = parts.joined(separator: "/")
         return GitHubRuns.isRepository(candidate) ? candidate : nil
+    }
+}
+
+/// Where Screenshot Magnet is looking, and what to do when it can't.
+private struct ScreenshotStatus: View {
+    @ObservedObject var service: ScreenshotService
+    var body: some View {
+        switch service.status {
+        case .off:
+            EmptyView()
+        case .watching(let folder):
+            Text("Watching \(Self.short(folder)). "
+                 + (ScreenshotService.showsFloatingThumbnail
+                    ? "macOS saves a screenshot once its floating thumbnail goes away (about five seconds); turn the thumbnail off in the Screenshot app's Options to see it sooner."
+                    : "Screenshots appear as soon as macOS saves them."))
+                .font(.caption).foregroundStyle(.secondary)
+        case .notFiles:
+            Text("Your screenshots go to the clipboard or an app rather than a file, so there's nothing to watch. In the Screenshot app, choose Options › Save to › a folder.")
+                .font(.caption).foregroundStyle(.secondary)
+        case .unavailable(let folder):
+            HStack {
+                Text("NotchFlow can't read \(Self.short(folder)). Allow it in System Settings › Privacy & Security › Files and Folders.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Try Again") { service.configure(enabled: true) }
+            }
+        }
+    }
+    static func short(_ folder: URL) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return folder.path.hasPrefix(home) ? "~" + folder.path.dropFirst(home.count) : folder.path
     }
 }

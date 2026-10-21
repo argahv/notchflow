@@ -34,6 +34,18 @@ enum Motion {
     }
     /// Absorbing a dropped file or a merging shape: more travel, more give.
     static var expressive: Animation { reduced ? .easeOut(duration: 0.16) : .spring(response: 0.48, dampingFraction: 0.72) }
+    /// The portal: the notch swelling toward a drag, opening under it, then drawing a drop in. Springs,
+    /// so a drag that turns back mid-way reverses from wherever the shape is.
+    static func portal(to stage: PortalStage) -> Animation {
+        if reduced { return .easeOut(duration: 0.16) }
+        switch stage {
+        case .aware: return .spring(response: 0.22, dampingFraction: 0.9)
+        case .attracted, .open, .receiving: return .spring(response: 0.3, dampingFraction: 0.8)
+        case .absorbing: return .spring(response: 0.44, dampingFraction: 0.86)
+        case .failed: return .spring(response: 0.3, dampingFraction: 1)
+        case .closed: return .spring(response: 0.32, dampingFraction: 1)
+        }
+    }
     /// Sliding selection indicators.
     static var selection: Animation { reduced ? .easeOut(duration: 0.12) : .spring(response: 0.3, dampingFraction: 0.86) }
 }

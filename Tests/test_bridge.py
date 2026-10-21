@@ -132,6 +132,20 @@ class AgentHookTests(unittest.TestCase):
                 self.assertEqual((event["source"], event["activityId"], event["project"]), ("claude-code", "sess-1", "portfolio"))
                 self.assertNotIn("request", event, "no request without the app's opt-in")
 
+    def test_test_runs_are_labelled_without_sending_the_command(self):
+        runs = ["swift test --filter Portal", "cd app && npm test", "FOO=1 pytest -q", "xcodebuild -scheme App test",
+                "python3 -m unittest discover -s Tests", "time go test ./...", "make lint; cargo test"]
+        for command in runs:
+            with self.subTest(command=command):
+                events, _ = self.run_hook(self.base("PreToolUse", tool_name="Bash", tool_input={"command": command}))
+                self.assertEqual(events[0]["agent"]["tool"], "Tests")
+                self.assertNotIn(command, json.dumps(events), "the command itself never leaves the hook")
+        for command in ("ls", "cat pytest.ini", "echo 'swift test'", "git commit -m 'npm test'", "swift build", "npm testing"):
+            with self.subTest(command=command):
+                self.assertFalse(bridge.runs_tests({"command": command}))
+        self.assertFalse(bridge.runs_tests(None))
+        self.assertTrue(bridge.runs_tests({"command": ["pytest", "-x"]}))
+
     def test_unrelated_and_malformed_payloads_are_ignored(self):
         for payload in (self.base("SubagentStop"), self.base("PreCompact", trigger="auto"),
                         self.base("Notification", notification_type="auth_success"), ["not", "an", "object"]):

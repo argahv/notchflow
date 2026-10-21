@@ -31,8 +31,39 @@ enum Metrics {
     static let searchField = 30.0
     static let todoRow = 30.0
     static let field = 30.0
-    static let fileTile = 84.0
+    static let fileTile = 96.0
     static let dropZone = 64.0
+    /// Portal: the swell beside a nearby drag, the target, the opening, and a drop's result.
+    static let portalAwareWing = 30.0
+    static let portalAwareDepth = 14.0
+    static let portalTarget = 56.0
+    static let portalOpening = 88.0
+    static let portalResult = 52.0
+    /// Screenshot Magnet: the arrival preview, the text result, and the annotation editor.
+    static let captureGlance = 112.0
+    static let captureTextArea = 196.0
+    static let annotateWidth = 700.0
+    static let annotateToolbar = 30.0
+    static let annotateMaxCanvas = 330.0
+    /// Notch Actions: a drop's result with its actions, the surface's width, the item's line, the
+    /// action grid, and each kind of result.
+    static let resultActionsWing = 190.0
+    static let actionsWidth = 600.0
+    static let actionColumns = 3
+    static let actionContext = 40.0
+    static let actionRow = 30.0
+    static let actionProcessing = 44.0
+    static let actionFailed = 48.0
+    static let actionText = 110.0
+    static let actionDetail = 20.0
+    static let actionCreated = 48.0
+    static let actionNote = 40.0
+    /// Time Travel's row of moments.
+    static let timelineStage = 82.0
+    /// Sound Island's glance.
+    static let soundGlance = 76.0
+    /// A one-time discovery tip under the quick-access shortcuts.
+    static let hintRow = 18.0
     static let historyRow = 44.0
     static let historyGroup = 24.0
     static let commandRow = 32.0
@@ -63,13 +94,30 @@ enum Metrics {
             return SurfaceForm(size: CGSize(width: size.width, height: size.height), ear: ear, corner: corner, inset: inset)
         }
         let hardware = CGFloat(display.notchCorner)
+        if snapshot.interaction.presentation != .expanded {
+            // The portal reshapes the resting or previewing notch around a drag and its drop.
+            switch snapshot.interaction.portal {
+            case .closed: break
+            case .aware:
+                // A drag nearby: the silhouette swells a little past whatever the band shows.
+                let wing = (model.hasBandStatus ? Metrics.statusWing : Metrics.portalAwareWing) + 8
+                return resolve(.content(width: display.notchWidth + 2 * wing, height: Metrics.portalAwareDepth, maxHeight: 40),
+                               wing: wing, ear: 8, corner: hardware + 5)
+            case .attracted:
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing, height: Metrics.portalTarget),
+                               wing: Metrics.glanceWing, ear: 10, corner: 22)
+            case .open, .receiving:
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.portalOpening),
+                               wing: Metrics.splitWing, ear: 12, corner: 26)
+            case .absorbing, .failed:
+                // A result that offers actions needs room for them beside its title.
+                let wing = (model.portalResult?.actions.isEmpty ?? true) ? Metrics.glanceWing : Metrics.resultActionsWing
+                return resolve(.content(width: display.notchWidth + 2 * wing, height: Metrics.portalResult),
+                               wing: wing, ear: 10, corner: 22)
+            }
+        }
         switch snapshot.interaction.presentation {
         case .collapsed:
-            if snapshot.interaction.awareness == .drag {
-                // A file is heading for the notch: open a drop target big enough to receive it.
-                return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing, height: 50),
-                               wing: Metrics.glanceWing, ear: 10, corner: 20)
-            }
             let status = model.hasBandStatus
             let aware = snapshot.interaction.awareness == .pointer
             let wing = status ? Metrics.statusWing : 0
@@ -83,11 +131,23 @@ enum Metrics {
             // from text), so there is no layout feedback loop and no horizontal jitter.
             switch model.glanceLead {
             case .quickAccess:
-                return resolve(.content(width: display.notchWidth + 2 * Metrics.quickWing, height: Metrics.quickHeight),
+                let hint = model.preferences.portalEnabled && !model.preferences.portalHintSeen
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.quickWing + (hint ? 40 : 0),
+                                        height: Metrics.quickHeight + (hint ? Metrics.hintRow + 6 : 0)),
                                wing: Metrics.quickWing, ear: 8, corner: 18)
             case .split:
                 return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.glanceHeight),
                                wing: Metrics.splitWing, ear: 10, corner: 22)
+            case .notification(let record) where model.celebration?.lead == record.id:
+                // Mission Complete widens the glance a little for the result and its next step.
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.glanceHeight),
+                               wing: Metrics.splitWing, ear: 10, corner: 22)
+            case .sound:
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.soundGlance),
+                               wing: Metrics.splitWing, ear: 10, corner: 22)
+            case .capture:
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.captureGlance),
+                               wing: Metrics.splitWing, ear: 12, corner: 24)
             default:
                 let depth = Double(model.glanceStackDepth)
                 return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing,
@@ -95,10 +155,25 @@ enum Metrics {
                                wing: Metrics.glanceWing, ear: 10, corner: 22)
             }
         case .expanded:
-            let width = workspaceWidth(display)
-            return resolve(.content(width: width, height: workspaceHeight(snapshot, model), minHeight: 56, maxHeight: 420),
+            // Annotating needs room for the image; everything else keeps the workspace's width.
+            let annotating = snapshot.route == .capture(.annotate)
+            let width = annotating ? annotationWidth(display)
+                : snapshot.route == .actions ? min(Metrics.actionsWidth, display.width - 2 * SurfaceGeometryEngine.screenMargin)
+                : workspaceWidth(display)
+            return resolve(.content(width: width, height: workspaceHeight(snapshot, model), minHeight: 56, maxHeight: annotating ? 540 : 420),
                            wing: Metrics.dockWing, ear: 14, corner: 28)
         }
+    }
+
+    static func annotationWidth(_ display: DisplayGeometry) -> Double {
+        min(Metrics.annotateWidth, display.width - 2 * SurfaceGeometryEngine.screenMargin)
+    }
+    /// The image area in the annotation editor: as wide as the surface allows, as tall as the image's
+    /// shape asks, within a ceiling. Shared by the size contract and the view.
+    static func annotationCanvas(_ display: DisplayGeometry, ear: Double, aspect: Double) -> CGSize {
+        let width = annotationWidth(display) - 2 * ear - 2 * Metrics.pad
+        let height = min(Metrics.annotateMaxCanvas, width / max(0.2, aspect))
+        return CGSize(width: min(width, height * max(0.2, aspect)), height: height)
     }
 
     static func workspaceHeight(_ snapshot: PresentationSnapshot, _ model: AppModel) -> Double {
@@ -130,7 +205,7 @@ enum Metrics {
                 height += Metrics.header + Metrics.gap + stack(rows, Metrics.fileTile)
                 if model.dropTargeted { height += Metrics.gap + Metrics.dropZone }
             }
-            if model.shelf.removed != nil || model.shelf.error != nil { height += Metrics.gap + 26 }
+            if !model.shelf.removed.isEmpty || model.shelf.error != nil { height += Metrics.gap + 26 }
             return height + pad
         case .tools(nil):
             return pad + stack((Tool.allCases.count + Metrics.tilesPerRow - 1) / Metrics.tilesPerRow, Metrics.tile) + pad
@@ -146,6 +221,38 @@ enum Metrics {
         case .command:
             let rows = max(1, min(Metrics.maxCommandRows, model.commandResults.count))
             return pad + Metrics.field + Metrics.gap + Double(rows) * Metrics.commandRow + pad
+        case .capture(.text):
+            return pad + Metrics.header + Metrics.gap + Metrics.captureTextArea + pad
+        case .capture(.annotate):
+            let canvas = annotationCanvas(model.geometry, ear: 14, aspect: Double(model.capture?.aspect ?? 1.6))
+            return pad + Metrics.header + Metrics.gap + Metrics.annotateToolbar + Metrics.gap + canvas.height
+                + Metrics.gap + Metrics.annotateToolbar + pad
+        case .actions:
+            guard let context = model.actionContext else { return pad + Metrics.emptyRow + pad }
+            let count = ActionRegistry.actions(for: context).count
+            let rows = (count + Metrics.actionColumns - 1) / Metrics.actionColumns
+            var height = pad + Metrics.header + Metrics.gap + Metrics.actionContext + Metrics.gap
+            height += count == 0 ? Metrics.emptyRow : stack(rows, Metrics.actionRow, gap: 6)
+            return height + actionResultHeight(model.actionRun.phase) + pad
+        case .timeline:
+            return pad + Metrics.header + Metrics.gap
+                + (model.timeline.isEmpty ? Metrics.emptyRow : Metrics.timelineStage + Metrics.gap + 26) + pad
+        }
+    }
+
+    static func actionResultHeight(_ phase: ActionRun.Phase) -> Double {
+        switch phase {
+        case .available: return 0
+        case .processing: return Metrics.gap + Metrics.actionProcessing
+        case .failed: return Metrics.gap + Metrics.actionFailed
+        case .completed(_, let outcome):
+            switch outcome {
+            case .text(let text) where text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty: return Metrics.gap + Metrics.actionNote
+            case .text: return Metrics.gap + Metrics.actionText + 6 + 26
+            case .details(let details): return Metrics.gap + Double(details.count) * (Metrics.actionDetail + 4) + 12
+            case .created: return Metrics.gap + Metrics.actionCreated
+            case .done: return Metrics.gap + Metrics.actionNote
+            }
         }
     }
 
