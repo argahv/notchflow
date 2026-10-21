@@ -61,10 +61,12 @@ struct NotchBand: View {
 
     var body: some View {
         let expanded = model.interaction.presentation == .expanded
+        // ZStack, not Group: a Group with nothing to show drops its frame, the gap slides off the
+        // camera, and the other side's status ends up behind the housing.
         HStack(spacing: 0) {
-            Group { if expanded { leadingDock } else { leadingStatus } }.frame(maxWidth: .infinity)
+            ZStack { if expanded { leadingDock } else { leadingStatus } }.frame(maxWidth: .infinity)
             Color.clear.frame(width: CGFloat(model.geometry.notchWidth))
-            Group { if expanded { trailingDock } else { trailingStatus } }.frame(maxWidth: .infinity)
+            ZStack { if expanded { trailingDock } else { trailingStatus } }.frame(maxWidth: .infinity)
         }
         .frame(height: model.geometry.band)
         .contentShape(Rectangle())
