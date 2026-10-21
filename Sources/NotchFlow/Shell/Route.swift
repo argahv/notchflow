@@ -123,6 +123,8 @@ enum GlanceSubject: Equatable {
     case notification(String)
     /// A screenshot that just arrived.
     case capture(UUID)
+    /// Sound moved to another output.
+    case sound
 }
 
 /// The drawn silhouette. Size, ears and corners animate together in one transaction.

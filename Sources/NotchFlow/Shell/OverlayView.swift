@@ -269,6 +269,8 @@ struct GlanceView: View {
                 }
             case .capture(let capture):
                 CaptureGlance(model: model, capture: capture)
+            case .sound(let transition):
+                SoundGlance(model: model, sound: model.sound, media: media, transition: transition)
             case .quickAccess:
                 QuickAccessRow(model: model)
             case .single(let item, let others):
@@ -348,6 +350,7 @@ struct GlanceView: View {
         case .privacy: "privacy"
         case .notification(let record): "n-\(record.id)"
         case .capture(let capture): "c-\(capture.id)"
+        case .sound(let transition): "sound-\(transition.name)"
         case .quickAccess: "quick"
         case .single(let item, _): "s-\(item.id)"
         case .split(let ambient, let work, _): "split-\(ambient.id)-\(work.id)"

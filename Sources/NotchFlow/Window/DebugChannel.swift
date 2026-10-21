@@ -103,6 +103,11 @@ import AppKit
             // "pasteboard:<name>": a named pasteboard another process filled, read exactly as a drop is.
             guard !argument.isEmpty else { break }
             _ = model.receiveDrop(NSPasteboard(name: NSPasteboard.Name(argument)), sequence: Int.random(in: 1...Int.max))
+        case "sound":
+            // "sound:connected:<name>" or "sound:switched:<name>": the glance a real output change would show.
+            let parts = argument.split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { break }
+            model.soundChanged(parts[0] == "connected" ? .connected(name: parts[1]) : .switched(name: parts[1], bluetooth: false))
         case "timeline":
             // "timeline:open", "timeline:move:<steps>" (positive is earlier), "timeline:now".
             let parts = argument.split(separator: ":").map(String.init)
@@ -189,6 +194,7 @@ import AppKit
                    "action: \(model.actionRun.phase) · created: \(model.actionCreated.count)",
                    "portal actions: \(model.portalResult?.actions.map(\.rawValue).joined(separator: ",") ?? "-")",
                    "agent pulse: \(model.agentPulse?.rawValue ?? "-")",
+                   "sound: \(model.sound.output?.name ?? "-") · volume \(model.sound.volume.map { String(format: "%.2f", $0) } ?? "-") · muted \(model.sound.muted.map(String.init) ?? "-") · bluetooth \(model.sound.bluetooth) · glance \(model.glance == .sound)",
                    "timeline: \(model.timeline.count) · at \(model.timelineCursor.index): \(model.timelineEntry.map { "\($0.kind.rawValue) \($0.title)" } ?? "-") · actions: \(model.timelineEntry.map { model.timelineActions($0).map(\.title).joined(separator: ",") } ?? "-")",
                    "celebration: \(model.celebration.map { "\($0.title) — \($0.detail) (\($0.batch.count))" } ?? "-")",
                    "annotations: \(model.annotations.items.map(\.tool.rawValue).joined(separator: ",")) · saved: \(model.annotatedCopy?.lastPathComponent ?? "-")",

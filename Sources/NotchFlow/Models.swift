@@ -91,10 +91,12 @@ struct QuickApp: Identifiable, Equatable {
     @Published var portalEnabled: Bool { didSet { save("portalEnabled", portalEnabled) } }
     /// Off by default: new screenshots appear in the notch. Watches the folder macOS saves them to.
     @Published var screenshotsEnabled: Bool { didSet { save("screenshotsEnabled", screenshotsEnabled) } }
+    /// The notch briefly shows a new sound output (AirPods connecting, a display's speakers) with its volume.
+    @Published var soundIslandEnabled: Bool { didSet { save("soundIslandEnabled", soundIslandEnabled) } }
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        defaults.register(defaults: ["overlayEnabled": true, "simulatedNotch": true, "portalEnabled": true,
+        defaults.register(defaults: ["overlayEnabled": true, "simulatedNotch": true, "portalEnabled": true, "soundIslandEnabled": true,
                                     "bridgeEnabled": true, "notchWidth": 190.0, "hoverDelay": 0.12,
                                     "showBattery": false, "historyRetentionDays": 30, "approvalWait": 25, "clipboardRetentionHours": 24, "contextAware": true,
                                     "quickApps": ["com.apple.Terminal", "com.microsoft.VSCode", "com.apple.finder", "com.apple.Safari", "com.apple.Notes"]])
@@ -125,6 +127,7 @@ struct QuickApp: Identifiable, Equatable {
         contextAware = defaults.bool(forKey: "contextAware")
         portalEnabled = defaults.bool(forKey: "portalEnabled")
         screenshotsEnabled = defaults.bool(forKey: "screenshotsEnabled")
+        soundIslandEnabled = defaults.bool(forKey: "soundIslandEnabled")
     }
 
     var modeSettings: ModeSettings {

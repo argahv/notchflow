@@ -114,6 +114,10 @@ struct SettingsView: View {
             }
             Section("Integrations") {
                 Toggle("Enable Music / Spotify controls", isOn: $preferences.mediaEnabled)
+                Toggle(isOn: $preferences.soundIslandEnabled) {
+                    Text("Show when sound changes output")
+                    Text("AirPods connecting or a switch to another speaker shows the device, its volume and a quick switch for a few seconds.")
+                }
                 Picker("Player", selection: $preferences.mediaPlayer) { Text("Music").tag("Music"); Text("Spotify").tag("Spotify") }
                     .disabled(!preferences.mediaEnabled)
                 Text("Automation permission is requested only when the Music tab is used. This adapter does not use private MediaRemote APIs.")

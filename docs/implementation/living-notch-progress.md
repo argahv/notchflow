@@ -327,3 +327,35 @@ running into the oldest and returning with Now; each moment's actions matched wh
 
 **Unverified.** ⌥-scroll, ⌘Y and the arrow keys on a real trackpad and keyboard (the debug channel calls the
 same functions).
+
+Commit: `925da00`.
+
+## Phase 7 — Spatial Sound Island
+
+**What changed.** CoreAudio property listeners (no polling, no permission) follow the default output, the
+device list, and the current output's volume and mute (`SoundService`). When sound moves to another output
+the notch shows a short glance (`SoundRules` decides what's news; the first look at startup never is):
+"AirPods Pro connected" when a Bluetooth output appears and takes the sound, "Playing through Studio
+Display" for a switch, with the device's glyph from its name and transport type, mute, a volume slider (or
+"Volume is set on the device" when it has none), a quick output switch, and play and next when Music or
+Spotify is in use (through `MediaService`). It retracts after five seconds unless the pointer is on it,
+waits while another surface is busy, only lights the rim in quiet mode, and doesn't appear with private
+details hidden. Settings › Integrations has a switch (on by default).
+
+**Not built, on purpose.** Volume-key changes aren't announced: macOS already shows its own indicator.
+Microphone use: there's no public, reliable signal for another app's microphone, so nothing is guessed. A
+music-reactive animation: no audio levels are available without capturing audio, so the resting music glyph
+stays still, as before (an earlier idle-cost fix).
+
+**Files.** `NotchCore/SoundRules.swift`, `Features/SoundService.swift`, `Shell/SoundGlance.swift`,
+`Tests/NotchCoreTests/SoundRulesTests.swift` (new); `Features/SystemTools.swift` (volume, mute, transport),
+`AppModel.swift`, `Models.swift`, `SettingsView.swift`, `Shell/Route.swift`, `Shell/OverlayView.swift`,
+`Shell/SurfaceLayout.swift`, `Window/DebugChannel.swift`.
+
+**Tested.** 108 Swift tests (2 new: only an output change is news; a new Bluetooth output is a connection, a
+known one a switch). On the development Mac the listeners read the real state (MacBook Air Speakers,
+volume 0.31, not muted) without changing it; a simulated AirPods connection showed the glance and it
+retracted on its own.
+
+**Unverified.** A real AirPods connection or output switch, and setting volume, mute or output from the
+glance: each would change the development Mac's audio, so they weren't exercised here.

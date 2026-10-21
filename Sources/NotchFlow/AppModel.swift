@@ -162,6 +162,8 @@ struct CommandItem: Identifiable {
         clock.onTick = { [weak self] date in self?.tick(date) }
         clock.run(countdown.running)
         screenshots.onCapture = { [weak self] capture in self?.captureArrived(capture) }
+        sound.onTransition = { [weak self] transition in self?.soundChanged(transition) }
+        sound.start()
         screenshots.configure(enabled: preferences.screenshotsEnabled)
         preferences.$screenshotsEnabled.dropFirst().removeDuplicates().sink { [weak self] enabled in
             DispatchQueue.main.async { self?.screenshots.configure(enabled: enabled) }
@@ -296,6 +298,8 @@ struct CommandItem: Identifiable {
         case notification(ActivityRecord)
         /// A screenshot that just arrived, with its actions.
         case capture(Capture)
+        /// Sound moved to another output: the device, its volume, and a quick switch.
+        case sound(SoundTransition)
         /// The most relevant item and how many other activities there are.
         case single(HoverItem, others: Int)
         /// Ambient (music or a timer) on the left, work that matters on the right, one surface.
@@ -313,6 +317,7 @@ struct CommandItem: Identifiable {
         if preferences.privacy { return .privacy }
         if case .notification(let id) = glance, let record = record(id) { return .notification(record) }
         if case .capture(let id) = glance, let capture, capture.id == id { return .capture(capture) }
+        if glance == .sound, let soundTransition { return .sound(soundTransition) }
         guard let primary = hoverChoice.primary, let item = hoverItem(primary) else { return .quickAccess }
         if let secondary = hoverChoice.secondary, let other = hoverItem(secondary) {
             return primary.family.isAmbient ? .split(ambient: item, work: other, others: hoverChoice.others)
@@ -385,6 +390,49 @@ struct CommandItem: Identifiable {
                                               allowSplit: SurfaceLayout.splitFits(geometry), pinned: hoverPin)
         return HoverPolicy.choose(candidates, current: fresh ? nil : hoverChoice, situation: situation)
     }
+
+    // MARK: Spatial Sound Island
+
+    let sound = SoundService()
+    @Published private(set) var soundTransition: SoundTransition?
+    private var soundWork: DispatchWorkItem?
+
+    /// Sound moved to another output: a short glance with the device, its volume and a quick switch,
+    /// then the notch retracts. Waits like a screenshot does; quiet mode only lights the rim.
+    func soundChanged(_ transition: SoundTransition) {
+        guard preferences.soundIslandEnabled, !preferences.privacy else { return }
+        soundTransition = transition
+        if preferences.quietMode || captureMustWait || captureGlanceShowing { illuminate(.silver); return }
+        refreshAudioOutputs()
+        var next = snapshot
+        if next.interaction.presentation == .collapsed { next.interaction.send(.attention) }
+        commit(next, also: { self.glance = .sound })
+        illuminate(.silver)
+        scheduleSoundDismiss()
+    }
+
+    private func scheduleSoundDismiss(after delay: TimeInterval = 5) {
+        soundWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.glance == .sound else { return }
+            if self.windows?.pointerInside == true { self.scheduleSoundDismiss(after: 2); return }
+            self.dismissSound()
+        }
+        soundWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func dismissSound() {
+        soundWork?.cancel()
+        guard glance == .sound else { return }
+        var next = snapshot
+        if next.interaction.presentation == .preview, windows?.pointerInside != true { next.interaction.send(.leave) }
+        commit(next, also: { self.glance = .summary })
+    }
+
+    func setSoundVolume(_ value: Float) { sound.setVolume(value); lockHover(); scheduleSoundDismiss(after: 4) }
+    func toggleSoundMute() { sound.toggleMute(); lockHover(); scheduleSoundDismiss(after: 4) }
+    func chooseSoundOutput(_ device: AudioOutput) { selectAudioOutput(device); lockHover(); scheduleSoundDismiss(after: 4) }
 
     // MARK: Time Travel
 
@@ -571,7 +619,7 @@ struct CommandItem: Identifiable {
     private var attentionContext: AttentionContext {
         // A drag on its way in, a drop's result or a screenshot just taken has the surface: passive
         // arrivals wait and light the rim.
-        AttentionContext(editing: interaction.editing || interaction.portal != .closed || captureGlanceShowing,
+        AttentionContext(editing: interaction.editing || interaction.portal != .closed || captureGlanceShowing || glance == .sound,
                          expanded: interaction.presentation == .expanded,
                          suppressed: preferences.quietMode || preferences.privacy)
     }
@@ -666,6 +714,7 @@ struct CommandItem: Identifiable {
         if now == .collapsed && was != .collapsed {
             if case .notification = glance { glance = .summary; celebration = nil; _ = attention.dismissCurrent(now: Date(), context: attentionContext) }
             if case .capture = glance { glance = .summary; captureWork?.cancel() }
+            if glance == .sound { glance = .summary; soundWork?.cancel() }
             openedByDrag = false; dropTargeted = false
             resumeCapture(); resumeAttention()
         }
@@ -1770,7 +1819,7 @@ struct CommandItem: Identifiable {
     }
 
     func stop() {
-        clock.run(false); providers.stopAll(); approvals.withdraw(); screenshots.stop(); recognition?.cancel()
+        clock.run(false); providers.stopAll(); approvals.withdraw(); screenshots.stop(); recognition?.cancel(); sound.stop()
         media.stop(); camera.stop(); backdrop.stop(); battery.stop()
     }
 }
