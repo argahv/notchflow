@@ -350,16 +350,19 @@ enum AnnotationMarks {
                 context.stroke(Path(rect(item).insetBy(dx: line / 2, dy: line / 2)), with: .color(ink), lineWidth: line)
             case .arrow:
                 let from = point(item.start), to = point(item.end)
-                let angle = atan2(to.y - from.y, to.x - from.x)
-                let head = max(line * 4, 10)
+                let angle: CGFloat = atan2(to.y - from.y, to.x - from.x)
+                let head: CGFloat = max(line * 4, 10)
+                func back(_ turn: CGFloat, _ length: CGFloat) -> CGPoint {
+                    CGPoint(x: to.x - cos(angle + turn) * length, y: to.y - sin(angle + turn) * length)
+                }
                 var shaft = Path()
                 shaft.move(to: from)
-                shaft.addLine(to: CGPoint(x: to.x - cos(angle) * head * 0.8, y: to.y - sin(angle) * head * 0.8))
+                shaft.addLine(to: back(0, head * 0.8))
                 context.stroke(shaft, with: .color(ink), style: StrokeStyle(lineWidth: line, lineCap: .round))
                 var tip = Path()
                 tip.move(to: to)
-                tip.addLine(to: CGPoint(x: to.x - cos(angle - .pi / 7) * head, y: to.y - sin(angle - .pi / 7) * head))
-                tip.addLine(to: CGPoint(x: to.x - cos(angle + .pi / 7) * head, y: to.y - sin(angle + .pi / 7) * head))
+                tip.addLine(to: back(-.pi / 7, head))
+                tip.addLine(to: back(.pi / 7, head))
                 tip.closeSubpath()
                 context.fill(tip, with: .color(ink))
             case .text:

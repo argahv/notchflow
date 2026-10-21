@@ -106,17 +106,21 @@ enum AnnotationRenderer {
                 context.stroke(rect(item).insetBy(dx: line / 2, dy: line / 2))
             case .arrow:
                 let from = point(item.start), to = point(item.end)
-                let angle = atan2(to.y - from.y, to.x - from.x)
-                let head = max(line * 4, 14)
+                // Explicit CGFloat throughout: mixing it with Double is ambiguous on older compilers.
+                let angle: CGFloat = atan2(to.y - from.y, to.x - from.x)
+                let head = CGFloat(max(line * 4, 14))
+                func back(_ turn: CGFloat, _ length: CGFloat) -> CGPoint {
+                    CGPoint(x: to.x - cos(angle + turn) * length, y: to.y - sin(angle + turn) * length)
+                }
                 context.setStrokeColor(ink); context.setFillColor(ink)
                 context.setLineWidth(line); context.setLineCap(.round)
                 // The shaft stops at the head's base so the tip stays sharp.
                 context.move(to: from)
-                context.addLine(to: CGPoint(x: to.x - cos(angle) * head * 0.8, y: to.y - sin(angle) * head * 0.8))
+                context.addLine(to: back(0, head * 0.8))
                 context.strokePath()
                 context.move(to: to)
-                context.addLine(to: CGPoint(x: to.x - cos(angle - .pi / 7) * head, y: to.y - sin(angle - .pi / 7) * head))
-                context.addLine(to: CGPoint(x: to.x - cos(angle + .pi / 7) * head, y: to.y - sin(angle + .pi / 7) * head))
+                context.addLine(to: back(-.pi / 7, head))
+                context.addLine(to: back(.pi / 7, head))
                 context.closePath(); context.fillPath()
             case .text:
                 guard let text = item.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { continue }
