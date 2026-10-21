@@ -50,6 +50,14 @@ import Quartz
             return
         }
         if event.phase.contains(.ended) || event.phase.contains(.cancelled) { sideways = 0 }
+        // In Time Travel, scrolling moves through time: back is earlier, forward is later.
+        if let model, model.interaction.presentation == .expanded, model.route == .timeline {
+            if event.phase.contains(.began) { sideways = 0 }
+            let delta = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) ? -event.scrollingDeltaX : event.scrollingDeltaY
+            sideways += event.hasPreciseScrollingDeltas ? delta : delta * 12
+            if abs(sideways) >= 30 { model.moveTimeline(sideways > 0 ? 1 : -1); sideways = 0 }
+            return
+        }
         // Scrolling inside a preview or workspace belongs to the content, not the notch gesture.
         guard let model, model.interaction.presentation == .collapsed else {
             scrollDistance = 0
@@ -72,6 +80,8 @@ import Quartz
         scrollDistance += abs(event.scrollingDeltaY)
         guard scrollDistance >= 28 else { return }
         scrollDistance = 0
+        // With ⌥ held, the same deliberate gesture opens Time Travel instead.
+        if event.modifierFlags.contains(.option) { model.openTimeline(); return }
         model.openWorkspace()
         model.windows?.focus()
     }
@@ -372,6 +382,12 @@ import Quartz
             if event.keyCode == 53 {
                 if composing { return event }
                 self.model.back(); return nil
+            }
+            if self.model.route == .timeline, !composing, [123, 124].contains(event.keyCode) {
+                self.model.moveTimeline(event.keyCode == 123 ? 1 : -1); return nil
+            }
+            if event.modifierFlags.contains(.command), !composing, event.charactersIgnoringModifiers?.lowercased() == "y" {
+                self.model.openTimeline(); return nil
             }
             if self.model.route == .command, !composing, [125, 126].contains(event.keyCode) {
                 self.model.moveCommandSelection(event.keyCode == 125 ? 1 : -1); return nil

@@ -386,6 +386,85 @@ struct CommandItem: Identifiable {
         return HoverPolicy.choose(candidates, current: fresh ? nil : hoverChoice, situation: situation)
     }
 
+    // MARK: Time Travel
+
+    /// Assembled when Time Travel opens, from what NotchFlow already keeps; nothing is stored for it.
+    @Published private(set) var timeline: [TimelineEntry] = []
+    @Published private(set) var timelineCursor = TimelineCursor(count: 0)
+    var timelineEntry: TimelineEntry? { timeline.indices.contains(timelineCursor.index) ? timeline[timelineCursor.index] : nil }
+
+    func openTimeline() {
+        timeline = buildTimeline()
+        timelineCursor = TimelineCursor(count: timeline.count)
+        navigate(.timeline); windows?.focus()
+    }
+
+    func moveTimeline(_ step: Int) {
+        var cursor = timelineCursor; cursor.move(step)
+        guard cursor != timelineCursor else { return }
+        withAnimation(Motion.selection) { timelineCursor = cursor }
+    }
+    func timelineToPresent() { withAnimation(Motion.selection) { timelineCursor = TimelineCursor(count: timeline.count) } }
+
+    private func buildTimeline() -> [TimelineEntry] {
+        let finished = queue.records.filter { $0.event.lifecycle.terminal }.map { record -> TimelineEntry in
+            let kind: TimelineEntry.Kind = switch record.event.kind {
+            case .agent: .agent
+            case .ci, .build, .deploy: .pipeline
+            case .download: .download
+            case .timer: .timer
+            default: record.event.source == "timer" ? .timer : .task
+            }
+            return TimelineEntry(id: "a:" + record.id, date: record.event.timestamp, kind: kind, title: record.event.title,
+                                 detail: ActivityText.subtitle(record))
+        }
+        let kept = shelf.items.map {
+            TimelineEntry(id: "s:" + $0.id.uuidString, date: $0.addedAt, kind: .shelf, title: $0.name,
+                          detail: $0.origin == "screenshot" ? "Screenshot on your shelf" : "Kept on your shelf")
+        }
+        let screenshot = capture.map { [TimelineEntry(id: "p:" + $0.url.path, date: $0.taken, kind: .screenshot, title: $0.name,
+                                                       detail: CaptureWording.meta($0))] } ?? []
+        // Clipboard text only when that feature is on, and never with private details hidden. Secrets are
+        // never in it to begin with.
+        let clips = preferences.clipboardEnabled && !preferences.privacy ? clipboard.items.map {
+            TimelineEntry(id: "c:" + $0.id.uuidString, date: $0.date, kind: .clipboard,
+                          title: ShelfPolicy.title(forText: $0.text), detail: "Copied" + ($0.source.map { " in \($0)" } ?? ""))
+        } : []
+        let days = preferences.historyRetentionDays
+        return TimelineRules.merge([finished, kept, screenshot, clips], since: days > 0 ? Date().addingTimeInterval(-Double(days) * 86_400) : nil)
+    }
+
+    struct TimelineAction: Identifiable { let id: String; let title: String; let perform: () -> Void }
+    /// What can be done with a moment, offered only while its source still exists.
+    func timelineActions(_ entry: TimelineEntry) -> [TimelineAction] {
+        let key = String(entry.id.dropFirst(2))
+        switch entry.id.prefix(2) {
+        case "a:":
+            guard let record = record(key) else { return [] }
+            var actions = [TimelineAction(id: "details", title: "Details") { [weak self] in self?.navigate(.history(detail: record.id)) }]
+            if record.event.actionURL != nil, [.download, .ci, .build, .deploy].contains(record.event.kind) {
+                if record.event.kind == .download, let url = record.event.actionURL.flatMap(URL.init(string:)),
+                   !FileManager.default.fileExists(atPath: url.path) { return actions }
+                actions.append(TimelineAction(id: "open", title: actionTitle(record)) { [weak self] in self?.openAction(record) })
+            }
+            return actions
+        case "s:":
+            guard let item = shelf.items.first(where: { $0.id.uuidString == key }) else { return [] }
+            if item.isFile, shelf.resolve(item) == nil { return [] }
+            return [TimelineAction(id: "actions", title: "Actions") { [weak self] in self?.openActions([item.id]) },
+                    TimelineAction(id: "copy", title: "Copy") { [weak self] in self?.copyShelfItem(item) }]
+        case "p:":
+            guard let capture, capture.url.path == key, FileManager.default.fileExists(atPath: key) else { return [] }
+            return [TimelineAction(id: "copy", title: "Copy") { [weak self] in self?.copyCapture() },
+                    TimelineAction(id: "reveal", title: "Show in Finder") { [weak self] in self?.revealCapture() }]
+        case "c:":
+            guard let clip = clipboard.items.first(where: { $0.id.uuidString == key }) else { return [] }
+            return [TimelineAction(id: "copy", title: "Copy Again") { [weak self] in self?.clipboard.copy(clip); self?.illuminate(.silver) }]
+        default:
+            return []
+        }
+    }
+
     // MARK: Living Split Island
 
     /// The hover item kept on the island, in memory only. Requests and failures still take the lead.
@@ -1651,6 +1730,7 @@ struct CommandItem: Identifiable {
             CommandItem(id: "music", title: "Music", symbol: Feature.music.symbol, hint: "⌘2") { [weak self] in self?.navigate(.music) },
             CommandItem(id: "activity", title: "Activity", symbol: Feature.activity.symbol, hint: "⌘1") { [weak self] in self?.navigate(.activity(detail: nil)) },
             CommandItem(id: "history", title: "History", symbol: Feature.history.symbol, hint: "⌘5") { [weak self] in self?.navigate(.history(detail: nil)) },
+            CommandItem(id: "timeline", title: "Time Travel", symbol: "clock.arrow.circlepath", hint: "⌘Y") { [weak self] in self?.openTimeline() },
         ]
         items += Tool.allCases.map { tool in
             CommandItem(id: "tool-\(tool.rawValue)", title: tool.title, symbol: tool.symbol, hint: "Tools") { [weak self] in self?.navigate(.tools(tool)) }

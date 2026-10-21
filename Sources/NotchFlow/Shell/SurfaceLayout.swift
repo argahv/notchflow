@@ -58,6 +58,8 @@ enum Metrics {
     static let actionDetail = 20.0
     static let actionCreated = 48.0
     static let actionNote = 40.0
+    /// Time Travel's row of moments.
+    static let timelineStage = 82.0
     static let historyRow = 44.0
     static let historyGroup = 24.0
     static let commandRow = 32.0
@@ -223,6 +225,9 @@ enum Metrics {
             var height = pad + Metrics.header + Metrics.gap + Metrics.actionContext + Metrics.gap
             height += count == 0 ? Metrics.emptyRow : stack(rows, Metrics.actionRow, gap: 6)
             return height + actionResultHeight(model.actionRun.phase) + pad
+        case .timeline:
+            return pad + Metrics.header + Metrics.gap
+                + (model.timeline.isEmpty ? Metrics.emptyRow : Metrics.timelineStage + Metrics.gap + 26) + pad
         }
     }
 

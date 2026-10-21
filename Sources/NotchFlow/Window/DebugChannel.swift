@@ -103,6 +103,15 @@ import AppKit
             // "pasteboard:<name>": a named pasteboard another process filled, read exactly as a drop is.
             guard !argument.isEmpty else { break }
             _ = model.receiveDrop(NSPasteboard(name: NSPasteboard.Name(argument)), sequence: Int.random(in: 1...Int.max))
+        case "timeline":
+            // "timeline:open", "timeline:move:<steps>" (positive is earlier), "timeline:now".
+            let parts = argument.split(separator: ":").map(String.init)
+            switch parts.first {
+            case "open": model.openTimeline()
+            case "move": model.moveTimeline(Int(parts.count > 1 ? parts[1] : "1") ?? 1)
+            case "now": model.timelineToPresent()
+            default: break
+            }
         case "split":
             // "split:next:primary|secondary", "split:prev:…", "split:pin:<hover id>" (music, timer, or an activity id).
             let parts = argument.split(separator: ":", maxSplits: 1).map(String.init)
@@ -180,6 +189,7 @@ import AppKit
                    "action: \(model.actionRun.phase) · created: \(model.actionCreated.count)",
                    "portal actions: \(model.portalResult?.actions.map(\.rawValue).joined(separator: ",") ?? "-")",
                    "agent pulse: \(model.agentPulse?.rawValue ?? "-")",
+                   "timeline: \(model.timeline.count) · at \(model.timelineCursor.index): \(model.timelineEntry.map { "\($0.kind.rawValue) \($0.title)" } ?? "-") · actions: \(model.timelineEntry.map { model.timelineActions($0).map(\.title).joined(separator: ",") } ?? "-")",
                    "celebration: \(model.celebration.map { "\($0.title) — \($0.detail) (\($0.batch.count))" } ?? "-")",
                    "annotations: \(model.annotations.items.map(\.tool.rawValue).joined(separator: ",")) · saved: \(model.annotatedCopy?.lastPathComponent ?? "-")",
                    "mode: \(model.preferences.mode?.title ?? "Custom")"]

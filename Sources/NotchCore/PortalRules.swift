@@ -180,10 +180,12 @@ public enum ShelfPolicy {
         return "link:" + string
     }
 
-    /// A one-line label: the first non-empty line, shortened.
+    /// A one-line label: the first non-empty line, spaces collapsed, shortened. Text that looks like a key
+    /// or password is never its own label, so it can't show up in the shelf, Time Travel or a result.
     public static func title(forText text: String) -> String {
+        if ClipClassifier.looksSecret(text) { return "Text that looks like a key" }
         let line = text.split(whereSeparator: \.isNewline).lazy
-            .map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
+            .map { $0.split(whereSeparator: { $0 == " " || $0 == "\t" }).joined(separator: " ") }.first { !$0.isEmpty } ?? ""
         return shorten(line.isEmpty ? "Text" : line, to: 60)
     }
     /// "example.com/docs/page" — no scheme, no "www.", shortened.

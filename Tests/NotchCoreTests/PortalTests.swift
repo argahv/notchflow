@@ -139,6 +139,9 @@ final class PortalTests: XCTestCase {
     func testTitlesAreShortAndReadable() {
         XCTAssertEqual(ShelfPolicy.title(forText: "\n\n  First line  \nsecond"), "First line")
         XCTAssertEqual(ShelfPolicy.title(forText: "   "), "Text")
+        XCTAssertEqual(ShelfPolicy.title(forText: "  meeting   notes \t for the launch "), "meeting notes for the launch")
+        XCTAssertEqual(ShelfPolicy.title(forText: "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789ABCD"), "Text that looks like a key",
+                       "a secret is never its own label")
         XCTAssertEqual(ShelfPolicy.title(forText: String(repeating: "a", count: 80)).count, 60)
         XCTAssertEqual(ShelfPolicy.title(forLink: URL(string: "https://www.example.com/docs/page")!), "example.com/docs/page")
         XCTAssertEqual(ShelfPolicy.title(forLink: URL(string: "https://example.com/")!), "example.com")

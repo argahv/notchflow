@@ -73,6 +73,8 @@ enum Route: Hashable {
     case capture(CaptureMode)
     /// Actions on what the person dropped or picked from the shelf (the model holds which items).
     case actions
+    /// Time Travel: recent finished work and kept content, one moment at a time.
+    case timeline
 
     static func root(_ feature: Feature) -> Route {
         switch feature {
@@ -90,7 +92,7 @@ enum Route: Hashable {
         case .shelf: .shelf
         case .tools: .tools
         case .history: .history
-        case .command, .capture, .actions: nil
+        case .command, .capture, .actions, .timeline: nil
         }
     }
     /// Identity of the content view; sub-routes share their feature's view.
@@ -98,6 +100,7 @@ enum Route: Hashable {
         switch self {
         case .capture: "capture"
         case .actions: "actions"
+        case .timeline: "timeline"
         default: feature?.rawValue ?? "command"
         }
     }
@@ -108,6 +111,7 @@ enum Route: Hashable {
         case .history(.some): .history(detail: nil)
         // What was acted on lives on the shelf; going back lands there.
         case .actions: .shelf
+        case .timeline: .history(detail: nil)
         default: nil
         }
     }

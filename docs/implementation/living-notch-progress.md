@@ -296,3 +296,34 @@ lapsed and the timer took the ambient half. Existing hover tests pass unchanged.
 
 **Unverified.** The sideways swipe and the click emphasis on screen (driven through the same calls by the
 debug channel, not by a trackpad).
+
+Commit: `ce002e7`.
+
+## Phase 6 — Time Travel
+
+**What changed.** An explicit mode for looking back, opened with ⌥-scroll on the resting notch, ⌘Y in the
+workspace, the Time Travel button in History, or the command palette (ordinary scrolling never opens it).
+It's assembled when opened from what NotchFlow already keeps (finished activities, shelf items, the latest
+screenshot, and clipboard text only when that feature is on and private details aren't hidden), merged
+newest first, one entry per item, within the History retention setting, at most 80 (`TimelineRules`).
+Nothing new is stored. The chosen moment sits in front with up to two neighbours either side receding by
+offset, scale, fade and a light blur; scrolling or swiping, ← and →, the chevrons and Now move through time
+(`TimelineCursor` never runs off either end). Actions are offered only while their source exists: Details
+and the run's or download's own action for activities (a download whose file is gone loses Show in Finder),
+Actions and Copy for shelf items, Copy and Show in Finder for a screenshot, Copy Again for clipboard text.
+Clearing History or the shelf clears Time Travel with it.
+
+Found and fixed while testing it: text that looks like a key or password was its own label on the shelf (and
+so in Time Travel). Such text is now labelled "Text that looks like a key"; titles also collapse runs of spaces.
+
+**Files.** `NotchCore/Timeline.swift`, `Surfaces/TimelineSurface.swift`, `Tests/NotchCoreTests/TimelineTests.swift`
+(new); `AppModel.swift`, `Shell/Route.swift`, `Shell/SurfaceLayout.swift`, `Shell/OverlayView.swift`,
+`Surfaces/HistorySurface.swift`, `Window/WindowManager.swift`, `Window/DebugChannel.swift`,
+`NotchCore/PortalRules.swift`.
+
+**Tested.** 106 Swift tests (3 new for merging, retention and the limit, and the cursor; 2 new assertions for
+labels). On a Debug build: 19 moments (CI runs, agent turns, shelf items) newest first; stepping back,
+running into the oldest and returning with Now; each moment's actions matched what still exists.
+
+**Unverified.** ⌥-scroll, ⌘Y and the arrow keys on a real trackpad and keyboard (the debug channel calls the
+same functions).
