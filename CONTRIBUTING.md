@@ -19,7 +19,7 @@ is released under the project's [MIT License](LICENSE).
 |---|---|
 | Mac | Apple silicon or Intel. A notched MacBook is great but not required: NotchFlow draws a notch on other displays. |
 | macOS | 14.6 or later to run. CI builds on macOS 15. |
-| Xcode | 16 or later (Swift 5.10+). |
+| Xcode | 16 or later (Swift 5.10+). CI uses the default Xcode on GitHub's `macos-15` runner; Xcode 27.1 on macOS 27 also builds and tests cleanly. |
 | Python | 3.9+ for the bridge and its tests (standard library only). |
 
 No package manager, no third-party dependencies, no XcodeGen.
@@ -47,7 +47,18 @@ NOTCHFLOW_SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" bash Scripts/bui
 ```
 
 Quit any installed copy of NotchFlow before running yours. A Debug build shares its data folder
-(`~/Library/Application Support/NotchFlow`) with the installed app.
+(`~/Library/Application Support/NotchFlow`) and its settings (bundle id `com.argahv.notchflow`) with the
+installed app. To keep your own shelf, history and settings out of a test run, give the Debug build its own
+folder and bundle id:
+
+```bash
+xcodebuild -project NotchFlow.xcodeproj -scheme NotchFlow -configuration Debug -derivedDataPath build/Sandbox \
+  PRODUCT_BUNDLE_IDENTIFIER=com.argahv.notchflow.dev CODE_SIGNING_ALLOWED=NO build
+NOTCHFLOW_APP_SUPPORT="$PWD/build/sandbox-data" build/Sandbox/Build/Products/Debug/NotchFlow.app/Contents/MacOS/NotchFlow
+```
+
+`NOTCHFLOW_APP_SUPPORT` is honoured by Debug builds only. Afterwards, `defaults delete com.argahv.notchflow.dev`
+clears that build's settings.
 
 ## Tests
 
@@ -58,6 +69,10 @@ python3 -I Tests/test_bridge.py     # 24 tests for the event CLI and agent hooks
 
 CI ([`verify.yml`](.github/workflows/verify.yml)) runs both, checks that the Xcode project is up to date,
 builds Debug and universal Release, and compiles the Metal shader. A pull request needs a green run.
+
+To compile the shader locally (`xcrun -sdk macosx metal -c Resources/LiquidGlass.metal -o build/LiquidGlass.air`)
+on Xcode 26 or later, install the Metal Toolchain once with `xcodebuild -downloadComponent MetalToolchain`.
+You don't need it to build or run the app: NotchFlow compiles the shader at runtime.
 
 Expectations:
 
