@@ -130,6 +130,10 @@ enum Metrics {
             case .split:
                 return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.glanceHeight),
                                wing: Metrics.splitWing, ear: 10, corner: 22)
+            case .notification(let record) where model.celebration?.lead == record.id:
+                // Mission Complete widens the glance a little for the result and its next step.
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.glanceHeight),
+                               wing: Metrics.splitWing, ear: 10, corner: 22)
             case .capture:
                 return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.captureGlance),
                                wing: Metrics.splitWing, ear: 12, corner: 24)

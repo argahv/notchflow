@@ -519,7 +519,7 @@ struct CommandItem: Identifiable {
     private func didCommit(from previous: PresentationSnapshot) {
         let now = interaction.presentation, was = previous.interaction.presentation
         if now == .collapsed && was != .collapsed {
-            if case .notification = glance { glance = .summary; _ = attention.dismissCurrent(now: Date(), context: attentionContext) }
+            if case .notification = glance { glance = .summary; celebration = nil; _ = attention.dismissCurrent(now: Date(), context: attentionContext) }
             if case .capture = glance { glance = .summary; captureWork?.cancel() }
             openedByDrag = false; dropTargeted = false
             resumeCapture(); resumeAttention()
@@ -559,6 +559,7 @@ struct CommandItem: Identifiable {
             try queue.ingest(event)
             persistQueue()
             recordAgentStep(event)
+            if record(event.key)?.event == event { trackAgent(event, prior: prior) }
             let updated = record(event.key)?.event
             let order = interaction.presentation == .expanded ? stackPlacement(for: event.key, prior: prior) : nil
             if updated == event && event.isMaterialChange(from: prior) { deliver(event) }
@@ -588,6 +589,16 @@ struct CommandItem: Identifiable {
     }
 
     private func deliver(_ event: ActivityEvent) {
+        // Mission Complete: a meaningful finish right after another joins the moment already showing.
+        if var shown = celebration, glance == .notification(shown.lead), let record = record(event.key),
+           let completion = completion(for: record), completionPolicy.joins(completion, shownSince: shown.since),
+           completionPolicy.importance(of: completion, in: .init()) == .celebrate {
+            shown.batch.append(completion)
+            (shown.title, shown.detail) = CompletionPolicy.headline(shown.batch)
+            celebration = shown
+            scheduleDismiss(AttentionItem(id: shown.lead, priority: .informational, arrived: Date()))
+            return
+        }
         let item = AttentionItem(id: event.key, priority: AttentionPriority(state: event.lifecycle), arrived: Date())
         switch attention.receive(item, context: attentionContext) {
         case .present(let item): present(item)
@@ -603,12 +614,30 @@ struct CommandItem: Identifiable {
     }
 
     private func present(_ item: AttentionItem) {
-        guard record(item.id) != nil else { attention.discard(id: item.id); return }
+        guard let record = record(item.id) else { attention.discard(id: item.id); return }
+        // Finished work: a short celebration when it's meaningful and the moment is free, a plain glance
+        // when it isn't meaningful or would land on typing, and only the rim in quiet situations.
+        var moment: Celebration?
+        if let completion = completion(for: record) {
+            let situation = CompletionPolicy.Situation(quiet: preferences.quietMode, typing: Self.typingNow,
+                                                       busy: interaction.presentation == .expanded || windows?.pointerInside == true)
+            switch completionPolicy.importance(of: completion, in: situation) {
+            case .indicate:
+                illuminate(.green)
+                _ = attention.dismissCurrent(now: Date(), context: attentionContext); resumeAttention()
+                return
+            case .celebrate:
+                moment = Celebration(lead: item.id, batch: [completion], since: Date(),
+                                     title: celebrationTitle(record), detail: celebrationDetail(record, completion))
+            case .glance:
+                break
+            }
+        }
         illuminate(item.priority.tone)
         var next = snapshot
         if next.interaction.presentation == .collapsed { next.interaction.send(.attention) }
         // Notifications never take keyboard focus.
-        commit(next, also: { self.glance = .notification(item.id) })
+        commit(next, also: { self.glance = .notification(item.id); self.celebration = moment })
         scheduleDismiss(item)
     }
 
@@ -630,7 +659,7 @@ struct CommandItem: Identifiable {
         let next = attention.dismissCurrent(now: Date(), context: attentionContext)
         var snapshot = self.snapshot
         if snapshot.interaction.presentation == .preview, windows?.pointerInside != true { snapshot.interaction.send(.leave) }
-        commit(snapshot, also: { self.glance = .summary })
+        commit(snapshot, also: { self.glance = .summary; self.celebration = nil })
         if let next { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.present(next) } }
     }
 
@@ -1022,6 +1051,101 @@ struct CommandItem: Identifiable {
         guard shelf.prepareQuickLook(item) else { return }
         windows?.showQuickLook()
     }
+
+    // MARK: Agent heartbeat and Mission Complete
+
+    /// The band's agent pulse, from what the sessions themselves reported.
+    var agentPulse: AgentPulse? { AgentPulseRules.pulse(for: agentRecords, now: Date()) }
+    /// When an agent last reported a change, so the pulse moves for a fixed time after real news only.
+    @Published private(set) var agentPulseChanged = Date.distantPast
+    private var agentRecords: [ActivityRecord] { queue.records.filter { $0.event.agent != nil && $0.dismissedAt == nil } }
+    private var pulseWork: DispatchWorkItem?
+    /// When each session's current turn began (its prompt was submitted), to state how long it worked.
+    private var turnStarted: [String: Date] = [:]
+    let completionPolicy = CompletionPolicy()
+
+    /// A celebration in the notch: one finish, or several that arrived together.
+    struct Celebration: Equatable {
+        let id = UUID()
+        var lead: String
+        var batch: [Completion]
+        let since: Date
+        var title: String
+        var detail: String
+    }
+    @Published private(set) var celebration: Celebration?
+
+    private func trackAgent(_ event: ActivityEvent, prior: ActivityEvent?) {
+        guard let agent = event.agent else { return }
+        let restarted = [AgentState.idle, .starting, .completed, .failed, .waitingForUser, .disconnected]
+        if agent.state == .working, prior?.agent?.state.map(restarted.contains) ?? true { turnStarted[event.key] = event.timestamp }
+        if event.lifecycle == .cancelled { turnStarted[event.key] = nil }
+        if prior?.agent?.state != agent.state || prior?.agent?.tool != agent.tool { agentPulseChanged = Date() }
+        refreshPulse()
+    }
+
+    /// A finish's mark and a silent session change with time alone; wake once at the next such moment.
+    private func refreshPulse() {
+        pulseWork?.cancel()
+        let now = Date()
+        let boundaries = agentRecords.compactMap { record -> Date? in
+            let at = record.event.timestamp.addingTimeInterval(record.event.lifecycle.terminal
+                ? AgentPulseRules.afterglow + 0.1 : AgentPulseRules.staleAfter + 0.1)
+            return at > now ? at : nil
+        }
+        guard let next = boundaries.min() else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.objectWillChange.send(); self?.reflow(); self?.refreshPulse()
+        }
+        pulseWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + next.timeIntervalSince(now), execute: work)
+    }
+
+    /// Finished work, with only what's known: its source, and how long an agent's turn ran when it was
+    /// seen from prompt to finish. Downloads report their size from the file itself.
+    private func completion(for record: ActivityRecord) -> Completion? {
+        let event = record.event
+        guard event.lifecycle == .completed else { return nil }
+        let source: Completion.Source = switch event.kind {
+        case .agent: .agent
+        case .ci: .ci
+        case .build: .build
+        case .deploy: .deploy
+        case .download: .download
+        case .timer: .timer
+        case .task, .meeting, .system: event.source == "timer" ? .timer : .other
+        }
+        let elapsed = event.agent != nil ? turnStarted[record.id].map { event.timestamp.timeIntervalSince($0) } : nil
+        let size = event.kind == .download
+            ? event.actionURL.flatMap(URL.init(string:)).flatMap { try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize }.map(Int64.init) : nil
+        return Completion(id: record.id, source: source, title: event.title, elapsed: elapsed, size: size, at: event.timestamp)
+    }
+
+    private func celebrationTitle(_ record: ActivityRecord) -> String {
+        let event = record.event
+        switch event.kind {
+        case .ci: return "\(event.title) passed"
+        case .build: return "\(event.title) succeeded"
+        case .deploy: return "\(event.title) deployed"
+        default: return event.title
+        }
+    }
+
+    private func celebrationDetail(_ record: ActivityRecord, _ completion: Completion) -> String {
+        let event = record.event
+        var parts: [String] = []
+        if event.kind == .ci { parts.append("All checks passed") }
+        if let place = event.agent?.repository ?? event.project { parts.append(place) }
+        if let branch = event.branch { parts.append(branch) }
+        if let elapsed = completion.elapsed {
+            parts.append("worked " + Duration.seconds(elapsed).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .abbreviated, maximumUnitCount: 2)))
+        }
+        if let size = completion.size { parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// A key was pressed in the last moment and a half: time since the last key event only, never which key.
+    static var typingNow: Bool { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown) < 1.5 }
 
     // MARK: Notch Actions
 

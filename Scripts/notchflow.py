@@ -242,6 +242,33 @@ def git_context(cwd):
         common = (gitdir / commondir.strip()).resolve()
     return branch or None, github_repository(read_small(common / "config") or "")
 
+TEST_RUNNERS = ("swift test", "npm test", "npm run test", "pnpm test", "pnpm run test", "yarn test", "bun test",
+                "npx jest", "npx vitest", "npx playwright test", "jest", "vitest", "pytest", "python -m pytest",
+                "python3 -m pytest", "python -m unittest", "python3 -m unittest", "go test", "cargo test", "rspec",
+                "bundle exec rspec", "rails test", "mvn test", "gradle test", "./gradlew test", "phpunit",
+                "vendor/bin/phpunit", "dotnet test", "mix test", "make test", "ctest")
+
+def runs_tests(tool_input):
+    """Whether a shell tool call runs a test suite, judged where each command starts. Only this yes or
+    no leaves the hook, as the tool label "Tests"; the command itself never does."""
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    if isinstance(command, list):
+        command = " ".join(str(part) for part in command)
+    if not isinstance(command, str):
+        return False
+    for segment in re.split(r"&&|\|\||[;|\n]", command[:4000]):
+        words = segment.strip().split()
+        while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", words[0]):  # FOO=1 swift test
+            words.pop(0)
+        if words and words[0] in ("sudo", "time", "exec"):
+            words.pop(0)
+        if words and words[0] == "xcodebuild" and any(word in ("test", "test-without-building") for word in words[1:]):
+            return True
+        text = " ".join(words)
+        if any(text == runner or text.startswith(runner + " ") for runner in TEST_RUNNERS):
+            return True
+    return False
+
 def agent_state_for(name, payload):
     """(state, agent state, tool) for a documented hook event, or None to ignore it."""
     tool = payload.get("tool_name")
@@ -251,7 +278,7 @@ def agent_state_for(name, payload):
     if name == "UserPromptSubmit":
         return "running", "working", None
     if name == "PreToolUse":
-        return "running", "executingTool", tool
+        return "running", "executingTool", "Tests" if runs_tests(payload.get("tool_input")) else tool
     if name in ("PostToolUse", "PostToolUseFailure"):
         return "running", "working", None
     if name == "PermissionRequest":

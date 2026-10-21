@@ -114,10 +114,15 @@ struct NotchBand: View {
                         Text("\(count)").font(TypeScale.badge).monospacedDigit().foregroundStyle(Ink.secondary)
                             .contentTransition(.numericText()).animation(Motion.micro, value: count)
                     }
+                    // What agents are doing, as far as their own events say.
+                    if let pulse = model.agentPulse {
+                        AgentHeartbeat(pulse: pulse, changed: model.agentPulseChanged)
+                    }
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(count > 1 ? "\(count) activities. Most urgent: \(top.event.title), \(top.event.lifecycle.label)"
-                                              : "\(top.event.title), \(top.event.lifecycle.label)")
+                .accessibilityLabel((count > 1 ? "\(count) activities. Most urgent: \(top.event.title), \(top.event.lifecycle.label)"
+                                               : "\(top.event.title), \(top.event.lifecycle.label)")
+                                    + (model.agentPulse.map { ". " + AgentHeartbeat.label($0) } ?? ""))
             case .music:
                 Group {
                     if let artwork = media.artwork { ArtworkView(image: artwork, size: 18) }
@@ -257,7 +262,11 @@ struct GlanceView: View {
                     Spacer(minLength: 8)
                 }
             case .notification(let record):
-                notification(record)
+                if let celebration = model.celebration, celebration.lead == record.id {
+                    CelebrationGlance(model: model, record: record, celebration: celebration)
+                } else {
+                    notification(record)
+                }
             case .capture(let capture):
                 CaptureGlance(model: model, capture: capture)
             case .quickAccess:

@@ -215,3 +215,56 @@ shelf's copy limits) and stay in NotchFlow's folder until removed.
 
 **Performance.** Nothing runs until an action is chosen, so idle cost is unchanged. An export polls its
 progress every 200 ms only while it runs.
+
+Commits: `9d25cb0`, and `234b782` (arrowhead maths made explicit for the CI compiler; the CI run for
+`8a317e7` failed on it, the one for `234b782` passed).
+
+## Phase 4 — Agent Heartbeat and Mission Complete
+
+**What changed.**
+- The resting band shows an agent pulse beside the activity dots, chosen deterministically across every
+  session (`AgentPulseRules`): waiting for you (amber raised hand), failed (red mark), tests (three steps
+  lighting in turn), a tool starting (one short move to the right), working (a slow flow along a track),
+  finished (a check that settles), idle (a still dot), gone quiet (an empty ring). Each has its own shape.
+- Motion runs for eight seconds after an agent actually reports a change, then the timeline pauses
+  outright. A finished or failed turn keeps its mark for eight seconds. A session that reports nothing for
+  ten minutes is shown as gone quiet, not as still working. Reduce Motion and Low Power: no motion.
+- The hook bridge now labels a shell tool call "Tests" when the command at the start of any segment is a
+  known test runner (`swift test`, `npm test`, `pytest`, `go test`, `cargo test`, `xcodebuild … test` and
+  others). Only that label leaves the hook; the command never does.
+- Mission Complete (`CompletionPolicy`): CI, builds, deploys and focus sessions, agent turns that worked at
+  least two minutes (measured from the prompt to the finish), and downloads of 100 MB or more earn a short
+  celebration: the glance widens, a seal settles in, a silver sheen crosses the lower edge once, and the
+  real result appears with one next step. Shorter work is a plain glance. Quiet mode: only the rim lights.
+  Never over typing (time since the last key press, which needs no permission and reads no keys) or over
+  an open or hovered notch. Finishes within eight seconds of each other become one ("2 tasks finished").
+  Only verified details are shown: project, branch, measured turn time, the file's real size.
+
+**Reused.** Agent states and tools from the existing hooks, `ActivityQueue` (ordering and duplicates), the
+band, `AttentionCenter` and its glances, `notificationAction` for the next step, `RimIllumination`.
+
+**Files.** New: `NotchCore/AgentPulse.swift`, `Shell/AgentHeartbeat.swift`,
+`Tests/NotchCoreTests/AgentPulseTests.swift`. Changed: `AppModel.swift`, `Shell/OverlayView.swift`,
+`Shell/SurfaceLayout.swift`, `Window/DebugChannel.swift`, `Scripts/notchflow.py`, `Tests/test_bridge.py`.
+
+**Tested.**
+- 99 Swift tests (6 new: each state's pulse, afterglow and staleness, priority in any order, what's
+  celebrated, typing and busy and quiet, batching) and 24 Python tests (1 new: test commands are labelled,
+  look-alikes such as `cat pytest.ini` and `echo 'swift test'` aren't, and the command never leaves).
+- End to end through the real bridge into a Debug build on a throwaway folder: session start, prompt,
+  `ls`, after the tool, `swift test`, a permission request, stop gave idle, working, tool, working, tests,
+  waiting, finished, and nothing eight seconds later. A three-minute turn was celebrated as "Claude Code —
+  portfolio · worked 3 min, 5 secs"; a CI pass as "Verify passed — All checks passed · notchflow · main";
+  a second pass five seconds later joined it as "2 tasks finished — Verify, Release". A short turn got a
+  plain glance.
+- During this check the first run's events went to the real inbox (the bridge binds its folder when it's
+  imported); they were moved to the throwaway inbox before NotchFlow read them, and the real inbox was
+  checked empty after every later step.
+
+**Unverified.** A live Claude Code or Codex session (the hooks aren't installed on the development Mac);
+the motion on screen (captures are offscreen, one frame); Focus or Do Not Disturb, which macOS only
+exposes to apps behind a separate permission, so quiet mode is the switch.
+
+**Privacy and performance.** Nothing new is collected: pulses come from states the hooks already sent, the
+tests label is a yes or no, and typing is the time since the last key press. No polling: the band wakes
+once when an afterglow or a staleness limit is reached, and animates only within eight seconds of a change.

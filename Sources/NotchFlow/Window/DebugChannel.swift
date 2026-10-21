@@ -170,6 +170,8 @@ import AppKit
                    "action context: \(model.actionContext.map { "\($0.kind.rawValue) \($0.title) pages=\($0.pageCount.map(String.init) ?? "-") sensitive=\($0.sensitive)" } ?? "-")",
                    "action: \(model.actionRun.phase) · created: \(model.actionCreated.count)",
                    "portal actions: \(model.portalResult?.actions.map(\.rawValue).joined(separator: ",") ?? "-")",
+                   "agent pulse: \(model.agentPulse?.rawValue ?? "-")",
+                   "celebration: \(model.celebration.map { "\($0.title) — \($0.detail) (\($0.batch.count))" } ?? "-")",
                    "annotations: \(model.annotations.items.map(\.tool.rawValue).joined(separator: ",")) · saved: \(model.annotatedCopy?.lastPathComponent ?? "-")",
                    "mode: \(model.preferences.mode?.title ?? "Custom")"]
             try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)
