@@ -416,7 +416,8 @@ struct CommandItem: Identifiable {
         PresentationSnapshot(interaction: interaction, route: route, openNoteID: openNoteID)
     }
     private var attentionContext: AttentionContext {
-        AttentionContext(editing: interaction.editing, expanded: interaction.presentation == .expanded,
+        // A drag on its way in, or a drop's result, has the surface: arrivals wait and light the rim.
+        AttentionContext(editing: interaction.editing || interaction.portal != .closed, expanded: interaction.presentation == .expanded,
                          suppressed: preferences.quietMode || preferences.privacy)
     }
 
@@ -477,8 +478,10 @@ struct CommandItem: Identifiable {
         if nextForm.size != form.size { windows?.prepare(for: nextForm.size) }
         let transition = windows?.beginTransition() ?? 0
         let reshaping = nextForm.size != previousForm.size || next.interaction.presentation != previous.interaction.presentation
-        let motion = animation ?? Motion.surface(from: previous.interaction.presentation, to: next.interaction.presentation,
-                                                 growing: nextForm.size.height >= previousForm.size.height)
+        let portalMoved = next.interaction.portal != previous.interaction.portal && next.interaction.presentation != .expanded
+        let motion = animation ?? (portalMoved ? Motion.portal(to: next.interaction.portal)
+            : Motion.surface(from: previous.interaction.presentation, to: next.interaction.presentation,
+                             growing: nextForm.size.height >= previousForm.size.height))
         withAnimation(motion, completionCriteria: .removed) {
             if reshaping { surfaceMoving = true }
             interaction = next.interaction
@@ -512,6 +515,7 @@ struct CommandItem: Identifiable {
         }
         if was == .expanded && now != .expanded { resumeAttention() }
         if previous.interaction.editing && !interaction.editing { resumeAttention() }
+        if previous.interaction.portal != .closed && interaction.portal == .closed { resumeAttention() }
         if let feature = route.feature {
             routeMemory[feature] = route
             if feature == .activity && now == .expanded { dockBadge = nil }
@@ -828,42 +832,176 @@ struct CommandItem: Identifiable {
         DispatchQueue.main.asyncAfter(deadline: .now() + next.timeIntervalSince(now) + 0.5, execute: work)
     }
 
-    // MARK: Shelf drag and drop
+    // MARK: Notch portal and shelf drops
 
-    func dragEntered() {
+    enum DragProximity { case away, near, close }
+    /// What the drag heading for the notch carries, as the portal names it.
+    @Published private(set) var portalCargo: PortalCargo?
+    /// What the last drop became, shown while it's drawn in.
+    @Published private(set) var portalResult: PortalResult?
+    /// Changes once per kept drop, so the silhouette's absorption beat runs exactly then.
+    @Published private(set) var portalPulse: UUID?
+    struct PortalResult: Equatable {
+        let id = UUID()
+        let kept: Bool
+        let title: String
+        let detail: String
+        let previews: [PortalPreview]
+    }
+    struct PortalPreview: Identifiable, Equatable { let id: UUID; let icon: NSImage?; let symbol: String }
+    private var portalWork: DispatchWorkItem?
+    private var lastDropSequence: Int?
+
+    /// The portal has the surface: a target, an opening, or a drop's result instead of the band or glance.
+    var portalShowing: Bool { interaction.presentation != .expanded && ![.closed, .aware].contains(interaction.portal) }
+
+    /// A drag carrying something the notch can keep moved nearer or further. Off when the portal is.
+    func dragProximity(_ proximity: DragProximity, cargo: PortalCargo?) {
+        guard preferences.portalEnabled || proximity == .away else { return }
+        var next = snapshot
+        switch proximity {
+        case .away: next.interaction.send(.retreat)
+        case .near: next.interaction.send(.dragApproach)
+        case .close: next.interaction.send(.dragAttract)
+        }
+        commit(next, also: proximity == .away ? nil : { if let cargo { self.portalCargo = cargo } })
+    }
+
+    func dragEntered(_ cargo: PortalCargo?) {
         returnWork?.cancel()
-        if interaction.presentation != .expanded { openedByDrag = true }
-        var next = snapshot; next.interaction.send(.beginDrag); next.route = .shelf
-        commit(next, also: { self.dropTargeted = true })
+        var next = snapshot
+        if next.interaction.presentation == .expanded || !preferences.portalEnabled {
+            // An open workspace, or the portal turned off, takes the drop into the shelf itself.
+            if next.interaction.presentation != .expanded { openedByDrag = true; next.interaction.send(.expand) }
+            next.interaction.send(.beginDrag); next.route = .shelf
+            commit(next, also: { self.dropTargeted = true })
+            return
+        }
+        portalWork?.cancel()
+        next.interaction.send(.beginDrag)
+        commit(next, also: {
+            self.dropTargeted = true; self.portalResult = nil
+            if let cargo { self.portalCargo = cargo }
+        })
     }
     func dragExited() {
         var next = snapshot; next.interaction.send(.endDrag)
         commit(next, also: { self.dropTargeted = false })
         windows?.scheduleLeave()
+        // A drag the proximity monitor never saw (or one cancelled over the notch) leaves nothing behind.
+        if interaction.portal.carrying, windows?.dragIsNear != true { send(.retreat) }
     }
-    func didDrop(_ urls: [URL]) -> Bool {
-        let added = urls.compactMap { shelf.add($0) }
-        var next = snapshot; next.interaction.send(.endDrag)
-        commit(next, animation: Motion.expressive, also: {
-            self.dropTargeted = false
-            self.lastArrival = added.last
-        })
-        if !added.isEmpty { illuminate(.silver) }
-        if openedByDrag {
-            // A drop that opened the shelf hands the notch back once the file has landed.
-            returnWork?.cancel()
-            let work = DispatchWorkItem { [weak self] in
-                guard let self, self.windows?.pointerInside != true, !self.interaction.pinned else { return }
-                self.send(.leave)
-            }
-            returnWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
+
+    /// A drop on the notch. What it carries is read now; promised files and images arrive a moment later.
+    func receiveDrop(_ pasteboard: NSPasteboard, sequence: Int) -> Bool {
+        // AppKit can deliver one drop twice; the repeat is ignored so nothing is added twice.
+        guard sequence != lastDropSequence else { return true }
+        lastDropSequence = sequence
+        switch PortalIntake.read(pasteboard, deliver: { [weak self] incoming, failures in self?.keep(incoming, failures: failures) }) {
+        case .now: return true
+        case .later: send(.receive); return true
+        case .nothing: reject("Nothing in that drop can be kept on the shelf."); return false
         }
-        return !added.isEmpty
     }
+
+    /// Stores what a drop carried, then shows it being drawn in, or why it couldn't be kept. The
+    /// animation only starts once the shelf has actually stored the items.
+    func keep(_ incoming: [ShelfIncoming], failures: [String] = []) {
+        let result = shelf.intake(incoming, origin: "drop")
+        let kept = !result.added.isEmpty || result.duplicates > 0
+        if interaction.presentation == .expanded {
+            var next = snapshot; next.interaction.send(kept ? .absorb : .rejectDrop)
+            commit(next, animation: Motion.expressive, also: { self.dropTargeted = false; self.lastArrival = result.added.last })
+            if !result.added.isEmpty { illuminate(.silver) }
+            if !kept { shelf.error = result.message ?? failures.first ?? "Nothing in that drop could be kept." }
+            if openedByDrag {
+                // A drop that opened the shelf hands the notch back once the file has landed.
+                returnWork?.cancel()
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self, self.windows?.pointerInside != true, !self.interaction.pinned else { return }
+                    self.send(.leave)
+                }
+                returnWork = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
+            }
+            return
+        }
+        guard kept else { reject(result.message ?? failures.first ?? "Nothing in that drop could be kept."); return }
+        let all = shelf.items
+        let added = result.added.compactMap { id in all.first { $0.id == id } }
+        let cargo = PortalRules.cargo(files: added.map { ($0.name, portalKind($0)) })
+        let skipped = result.refusals.count + failures.count
+        let detail = added.isEmpty ? "Already on your shelf"
+            : skipped > 0 ? "Kept \(added.count) of \(added.count + skipped) · on your shelf"
+            : "Kept on your shelf · \(all.count) \(all.count == 1 ? "item" : "items")"
+        let summary = PortalResult(kept: true, title: cargo?.title ?? portalCargo?.title ?? "Shelf", detail: detail,
+                                   previews: added.prefix(3).map(portalPreview))
+        var next = snapshot; next.interaction.send(.absorb)
+        commit(next, also: {
+            self.dropTargeted = false; self.lastArrival = result.added.last
+            self.portalResult = summary
+            if !added.isEmpty { self.portalPulse = summary.id }
+        })
+        illuminate(.silver)
+        schedulePortalSettle(after: 1.6)
+    }
+
+    private func reject(_ message: String) {
+        var next = snapshot; next.interaction.send(.rejectDrop)
+        if next.interaction.presentation == .expanded {
+            shelf.error = message
+            commit(next, also: { self.dropTargeted = false })
+            return
+        }
+        commit(next, also: {
+            self.dropTargeted = false
+            self.portalResult = PortalResult(kept: false, title: "Couldn't keep that", detail: message, previews: [])
+        })
+        illuminate(.amber)
+        schedulePortalSettle(after: 2.8)
+    }
+
+    /// Hands the notch back after a drop's result. Someone reading it keeps it a little longer.
+    private func schedulePortalSettle(after delay: TimeInterval, extensions: Int = 0) {
+        portalWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, [.receiving, .absorbing, .failed].contains(self.interaction.portal) else { return }
+            if self.windows?.pointerInside == true, extensions < 4 {
+                self.schedulePortalSettle(after: 1, extensions: extensions + 1); return
+            }
+            var next = self.snapshot; next.interaction.send(.settlePortal)
+            self.commit(next, also: { self.portalResult = nil; self.portalCargo = nil })
+        }
+        portalWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func portalKind(_ item: ShelfFile) -> PortalContentKind {
+        switch item.kind {
+        case .text: .text
+        case .link: .link
+        case .reference, .copy: shelf.resolve(item).map(PortalIntake.kind(of:)) ?? .file
+        }
+    }
+
+    private func portalPreview(_ item: ShelfFile) -> PortalPreview {
+        switch item.kind {
+        case .text: PortalPreview(id: item.id, icon: nil, symbol: "text.alignleft")
+        case .link: PortalPreview(id: item.id, icon: nil, symbol: "link")
+        case .reference, .copy:
+            PortalPreview(id: item.id, icon: shelf.resolve(item).map { NSWorkspace.shared.icon(forFile: $0.path) }, symbol: "doc")
+        }
+    }
+
     func removeFromShelf(_ item: ShelfFile) { shelf.remove(item); reflow() }
+    func clearShelf() { shelf.clear(); reflow() }
     func undoShelfRemoval() { shelf.undo(); reflow() }
     func chooseShelfFiles() { shelf.chooseFiles(); reflow() }
+    func copyShelfItem(_ item: ShelfFile) { shelf.copyToPasteboard(item); illuminate(.silver) }
+    func quickLook(_ item: ShelfFile) {
+        guard shelf.prepareQuickLook(item) else { return }
+        windows?.showQuickLook()
+    }
 
     // MARK: Notes and to-dos
 

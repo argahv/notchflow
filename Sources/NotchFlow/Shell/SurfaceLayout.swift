@@ -31,8 +31,14 @@ enum Metrics {
     static let searchField = 30.0
     static let todoRow = 30.0
     static let field = 30.0
-    static let fileTile = 84.0
+    static let fileTile = 96.0
     static let dropZone = 64.0
+    /// Portal: the swell beside a nearby drag, the target, the opening, and a drop's result.
+    static let portalAwareWing = 30.0
+    static let portalAwareDepth = 14.0
+    static let portalTarget = 56.0
+    static let portalOpening = 88.0
+    static let portalResult = 52.0
     static let historyRow = 44.0
     static let historyGroup = 24.0
     static let commandRow = 32.0
@@ -63,13 +69,28 @@ enum Metrics {
             return SurfaceForm(size: CGSize(width: size.width, height: size.height), ear: ear, corner: corner, inset: inset)
         }
         let hardware = CGFloat(display.notchCorner)
+        if snapshot.interaction.presentation != .expanded {
+            // The portal reshapes the resting or previewing notch around a drag and its drop.
+            switch snapshot.interaction.portal {
+            case .closed: break
+            case .aware:
+                // A drag nearby: the silhouette swells a little past whatever the band shows.
+                let wing = (model.hasBandStatus ? Metrics.statusWing : Metrics.portalAwareWing) + 8
+                return resolve(.content(width: display.notchWidth + 2 * wing, height: Metrics.portalAwareDepth, maxHeight: 40),
+                               wing: wing, ear: 8, corner: hardware + 5)
+            case .attracted:
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing, height: Metrics.portalTarget),
+                               wing: Metrics.glanceWing, ear: 10, corner: 22)
+            case .open, .receiving:
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.portalOpening),
+                               wing: Metrics.splitWing, ear: 12, corner: 26)
+            case .absorbing, .failed:
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing, height: Metrics.portalResult),
+                               wing: Metrics.glanceWing, ear: 10, corner: 22)
+            }
+        }
         switch snapshot.interaction.presentation {
         case .collapsed:
-            if snapshot.interaction.awareness == .drag {
-                // A file is heading for the notch: open a drop target big enough to receive it.
-                return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing, height: 50),
-                               wing: Metrics.glanceWing, ear: 10, corner: 20)
-            }
             let status = model.hasBandStatus
             let aware = snapshot.interaction.awareness == .pointer
             let wing = status ? Metrics.statusWing : 0
@@ -130,7 +151,7 @@ enum Metrics {
                 height += Metrics.header + Metrics.gap + stack(rows, Metrics.fileTile)
                 if model.dropTargeted { height += Metrics.gap + Metrics.dropZone }
             }
-            if model.shelf.removed != nil || model.shelf.error != nil { height += Metrics.gap + 26 }
+            if !model.shelf.removed.isEmpty || model.shelf.error != nil { height += Metrics.gap + 26 }
             return height + pad
         case .tools(nil):
             return pad + stack((Tool.allCases.count + Metrics.tilesPerRow - 1) / Metrics.tilesPerRow, Metrics.tile) + pad

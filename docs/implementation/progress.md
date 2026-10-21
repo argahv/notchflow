@@ -1,6 +1,7 @@
 # Liquid Workspace 2.0 — implementation progress
 
-Branch `feat/liquid-workspace-2`. Status as of 2026-10-20.
+Branch `feat/liquid-workspace-2`. Status as of 2026-10-20. Later work (portal, screenshots, actions and
+more) is tracked in [living-notch-progress.md](living-notch-progress.md).
 
 - **Implemented** means the code is in place and builds (Debug and Release).
 - **Tested** means automated tests cover it, and/or it was verified end to end on the development Mac

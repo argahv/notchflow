@@ -25,6 +25,7 @@ import SwiftData
             self.container = container
             model.shelf.context = container.mainContext
             model.context = container.mainContext
+            model.shelf.sweepOrphans()
             settingsObserver = NotificationCenter.default.addObserver(forName: .openNotchFlowSettings, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.settings() }
             }

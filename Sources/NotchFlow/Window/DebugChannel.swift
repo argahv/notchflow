@@ -76,6 +76,39 @@ import AppKit
             }
         case "clearActivities":
             model.clearHistory(); model.reflow()
+        case "portal":
+            // "portal:near:<kind>:<count>", "portal:close:<kind>:<count>", "portal:enter", "portal:exit",
+            // "portal:away". Drives the same calls the drag monitor and the drop target make.
+            let parts = argument.split(separator: ":").map(String.init)
+            let cargo = parts.count > 1 ? PortalCargo(kind: PortalContentKind(rawValue: parts[1]) ?? .file,
+                                                      count: parts.count > 2 ? Int(parts[2]) ?? 1 : 1) : nil
+            switch parts.first {
+            case "near": model.dragProximity(.near, cargo: cargo)
+            case "close": model.dragProximity(.close, cargo: cargo)
+            case "enter": model.dragEntered(cargo ?? model.portalCargo)
+            case "exit": model.dragExited()
+            default: model.dragProximity(.away, cargo: nil)
+            }
+        case "drop":
+            // "drop:file:<path>|<path>", "drop:text:<text>", "drop:link:<url>": the drop path after the pasteboard.
+            let parts = argument.split(separator: ":", maxSplits: 1).map(String.init)
+            let value = parts.count > 1 ? parts[1] : ""
+            switch parts.first {
+            case "file": model.keep(value.split(separator: "|").map { .reference(URL(fileURLWithPath: String($0))) })
+            case "text": model.keep([.text(value.replacingOccurrences(of: "\\n", with: "\n"), rich: nil)])
+            case "link": model.keep(ShelfPolicy.link(from: value).map { [.link($0)] } ?? [])
+            default: break
+            }
+        case "pasteboard":
+            // "pasteboard:<name>": a named pasteboard another process filled, read exactly as a drop is.
+            guard !argument.isEmpty else { break }
+            _ = model.receiveDrop(NSPasteboard(name: NSPasteboard.Name(argument)), sequence: Int.random(in: 1...Int.max))
+        case "shelf":
+            switch argument {
+            case "clear": model.clearShelf()
+            case "undo": model.undoShelfRemoval()
+            default: break
+            }
         case "snapshot":
             // "snapshot:<name>" or "snapshot:<name>:light"
             let parts = argument.split(separator: ":").map(String.init)
@@ -87,6 +120,8 @@ import AppKit
                 + ["route: \(model.route) · \(model.interaction.presentation)",
                    "hover: \(model.hoverChoice.primary?.id ?? "-") + \(model.hoverChoice.secondary?.id ?? "-") +\(model.hoverChoice.others)",
                    "context: \(model.contextBoost.map(\.rawValue).sorted().joined(separator: ","))",
+                   "portal: \(model.interaction.portal.rawValue) · awareness: \(model.interaction.awareness.rawValue) · shelf: \(model.shelfCount)",
+                   "portal result: \(model.portalResult.map { "\($0.title) — \($0.detail)" } ?? "-")",
                    "mode: \(model.preferences.mode?.title ?? "Custom")"]
             try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)
         case "dumpHooks":

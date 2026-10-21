@@ -17,15 +17,20 @@ struct OverlayView: View {
             VStack(spacing: 0) {
                 NotchBand(model: model, clock: model.clock, battery: model.battery, media: model.media)
                 Group {
-                    switch presentation {
-                    case .collapsed:
-                        if model.interaction.awareness == .drag { DropApproach() }
-                    case .preview:
-                        GlanceView(model: model, media: model.media, clock: model.clock)
+                    if presentation != .expanded && model.interaction.portal != .closed {
+                        PortalView(model: model, stage: model.interaction.portal)
                             .frame(width: form.size.width, height: contentHeight, alignment: .top)
-                    case .expanded:
-                        WorkspaceView(model: model)
-                            .frame(width: form.size.width, height: contentHeight, alignment: .top)
+                    } else {
+                        switch presentation {
+                        case .collapsed:
+                            EmptyView()
+                        case .preview:
+                            GlanceView(model: model, media: model.media, clock: model.clock)
+                                .frame(width: form.size.width, height: contentHeight, alignment: .top)
+                        case .expanded:
+                            WorkspaceView(model: model)
+                                .frame(width: form.size.width, height: contentHeight, alignment: .top)
+                        }
                     }
                 }
                 .transition(.surfaceContent)
@@ -36,6 +41,13 @@ struct OverlayView: View {
         .overlay { EdgeLight(shape: shape, presentation: presentation, awareness: model.interaction.awareness,
                              moving: model.surfaceMoving, band: model.geometry.band) }
         .overlay { RimIllumination(shape: shape, illumination: model.illumination, band: model.geometry.band) }
+        // A kept drop pulls the lower rim up for a beat as it's drawn in, then the shape settles.
+        .keyframeAnimator(initialValue: 1.0, trigger: model.portalPulse) { content, squash in
+            content.scaleEffect(x: 1, y: squash, anchor: .top)
+        } keyframes: { _ in
+            CubicKeyframe(Motion.reduced ? 1 : 0.965, duration: 0.14)
+            SpringKeyframe(1, duration: 0.34, spring: Spring(response: 0.34, dampingRatio: 0.7))
+        }
         .contentShape(shape)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.nookNamespace, space)
@@ -81,7 +93,7 @@ struct NotchBand: View {
 
     // Resting and glance: a single status each side, nothing when there is nothing to say.
     @ViewBuilder private var leadingStatus: some View {
-        if model.interaction.presentation == .collapsed, let status = model.leadingStatus {
+        if model.interaction.presentation == .collapsed, !model.portalShowing, let status = model.leadingStatus {
             switch status {
             case .privacy:
                 Image(systemName: "eye.slash").font(.system(size: 11, weight: .semibold)).foregroundStyle(Ink.secondary)
@@ -130,7 +142,7 @@ struct NotchBand: View {
             default: return false
             }
         }()
-        if let status = model.trailingStatus, !glanceShowsTimer {
+        if let status = model.trailingStatus, !glanceShowsTimer, !model.portalShowing {
             switch status {
             case .timer:
                 Text(model.timerLabel(at: clock.now))
@@ -220,18 +232,6 @@ struct NotchBand: View {
             .help(help)
             .accessibilityAddTraits(selected ? .isSelected : [])
             .reveal(.secondary, stagger: Double(index) * 0.022)
-    }
-}
-
-/// While a file drag approaches, the resting notch becomes a target big enough to receive it.
-struct DropApproach: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "tray.and.arrow.down.fill").foregroundStyle(Ink.silver)
-            Text("Drop to shelf").font(TypeScale.cardTitle)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .reveal(.primary)
     }
 }
 

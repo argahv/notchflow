@@ -34,6 +34,10 @@ struct SettingsView: View {
             Section("Workspace") {
                 Toggle("Show notch overlay", isOn: $preferences.overlayEnabled)
                 Toggle("Simulate a notch on displays without one", isOn: $preferences.simulatedNotch)
+                Toggle(isOn: $preferences.portalEnabled) {
+                    Text("Drop anything on the notch to keep it")
+                    Text("The notch opens toward a file, image, link or text you drag to it and keeps it on the shelf. Off, dropping on the notch opens the shelf instead.")
+                }
                 Picker("Display", selection: $preferences.selectedDisplay) {
                     Text("Automatic · Prefer built-in notch").tag("")
                     ForEach(NSScreen.screens, id: \.self) { screen in

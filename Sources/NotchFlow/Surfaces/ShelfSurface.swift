@@ -1,8 +1,10 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
-/// Temporary file references. Dropping a file lands it with a small arrival; dragging one out hands
-/// it straight to the system drag. Originals are never moved, copied or modified.
+/// What was dropped on the notch or added here: files by reference (originals are never moved,
+/// copied or modified), and the text, links and images a drop carried without a file of its own.
+/// Dropping lands an item with a small arrival; dragging one out hands it to the system as what it is.
 struct ShelfSurface: View {
     @ObservedObject var model: AppModel
     @ObservedObject var service: ShelfService
@@ -15,14 +17,17 @@ struct ShelfSurface: View {
                 DropZone(active: model.dropTargeted, choose: model.chooseShelfFiles)
                     .frame(height: Metrics.dropZone)
                     .reveal(.primary)
-                Text("References only. Your original files stay where they are.")
+                Text("Files stay where they are. Text, links and images are saved here.")
                     .font(TypeScale.secondary).foregroundStyle(Ink.secondary).frame(height: 16)
                     .reveal(.secondary)
             } else {
                 HStack(spacing: 8) {
-                    Text(files.count == 1 ? "1 file" : "\(files.count) files").font(TypeScale.cardTitle)
-                    Text("References only").font(TypeScale.meta).foregroundStyle(Ink.secondary)
+                    Text(files.count == 1 ? "1 item" : "\(files.count) items").font(TypeScale.cardTitle)
+                    Text("Originals stay where they are").font(TypeScale.meta).foregroundStyle(Ink.secondary)
                     Spacer()
+                    Button { model.clearShelf() } label: { Label("Clear", systemImage: "xmark.bin") }
+                        .buttonStyle(PillButtonStyle())
+                        .help("Remove everything from the shelf. Originals aren't touched, and Undo brings it back.")
                     Button { model.chooseShelfFiles() } label: { Label("Add", systemImage: "plus") }
                         .buttonStyle(PillButtonStyle())
                 }
@@ -32,7 +37,7 @@ struct ShelfSurface: View {
                 ScrollView(.vertical) {
                     LazyVGrid(columns: columns, spacing: Metrics.gap) {
                         ForEach(files) { item in
-                            FileTile(item: item, service: service, arrived: model.lastArrival == item.id) { model.removeFromShelf(item) }
+                            FileTile(item: item, model: model, service: service, arrived: model.lastArrival == item.id) { model.removeFromShelf(item) }
                         }
                     }
                 }
@@ -42,9 +47,11 @@ struct ShelfSurface: View {
                     DropZone(active: true, choose: nil).frame(height: Metrics.dropZone).transition(.opacity)
                 }
             }
-            if service.removed != nil {
-                Button { model.undoShelfRemoval() } label: { Label("Undo removal", systemImage: "arrow.uturn.backward") }
-                    .buttonStyle(PillButtonStyle()).frame(height: 26)
+            if !service.removed.isEmpty {
+                Button { model.undoShelfRemoval() } label: {
+                    Label(service.removed.count == 1 ? "Undo removal" : "Undo clear (\(service.removed.count) items)", systemImage: "arrow.uturn.backward")
+                }
+                .buttonStyle(PillButtonStyle()).frame(height: 26)
             } else if let error = service.error {
                 Text(error).font(TypeScale.secondary).foregroundStyle(Ink.amber).lineLimit(1).frame(height: 26)
             }
@@ -83,6 +90,7 @@ struct DropZone: View {
 
 private struct FileTile: View {
     let item: ShelfFile
+    @ObservedObject var model: AppModel
     @ObservedObject var service: ShelfService
     let arrived: Bool
     let remove: () -> Void
@@ -93,15 +101,17 @@ private struct FileTile: View {
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: 4) {
             Group {
                 if let thumbnail { Image(nsImage: thumbnail).resizable().aspectRatio(contentMode: .fit) }
-                else { Image(systemName: "doc").font(.system(size: 22)).foregroundStyle(Ink.secondary) }
+                else { Image(systemName: symbol).font(.system(size: 20)).foregroundStyle(Ink.secondary) }
             }
-            .frame(width: 44, height: 44)
+            .frame(width: 40, height: 40)
             Text(item.name).font(.system(size: 10.5, weight: .medium)).foregroundStyle(Ink.primary)
                 .lineLimit(2).multilineTextAlignment(.center).truncationMode(.middle)
                 .frame(height: 26, alignment: .top)
+            Text(meta).font(.system(size: 9.5, weight: .medium)).monospacedDigit().foregroundStyle(Ink.secondary)
+                .lineLimit(1).truncationMode(.middle).frame(height: 12)
         }
         .frame(maxWidth: .infinity).frame(height: Metrics.fileTile)
         .nookMaterial(.interactive, radius: 12, hovering: hovering)
@@ -117,21 +127,24 @@ private struct FileTile: View {
         .opacity(arrived && !landed ? 0 : 1)
         .onHover { hovering = $0 }
         .animation(Motion.micro, value: hovering)
-        .onTapGesture(count: 2) { service.open(item) }
-        .onDrag {
-            guard let url = service.resolve(item) else { return NSItemProvider() }
-            return NSItemProvider(object: url as NSURL)
-        }
+        // Text has nothing to open; a double-click copies it instead.
+        .onTapGesture(count: 2) { if item.kind == .text { model.copyShelfItem(item) } else { service.open(item) } }
+        .onDrag { service.itemProvider(for: item) }
         .contextMenu {
-            Button("Open") { service.open(item) }
-            Button("Show in Finder") { service.reveal(item) }
+            if item.isFile { Button("Quick Look") { model.quickLook(item) } }
+            if item.kind != .text { Button(item.kind == .link ? "Open Link" : "Open") { service.open(item) } }
+            Button("Copy") { model.copyShelfItem(item) }
+            if item.isFile { Button("Show in Finder") { service.reveal(item) } }
             Divider()
             Button("Remove from shelf", role: .destructive, action: remove)
         }
-        .help(item.name)
+        .help(help)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(item.name)
-        .accessibilityAction(named: "Open") { service.open(item) }
+        .accessibilityValue(meta)
+        .accessibilityAction(named: item.kind == .text ? "Copy" : "Open") {
+            if item.kind == .text { model.copyShelfItem(item) } else { service.open(item) }
+        }
         .task(id: item.id) {
             thumbnail = await service.thumbnail(for: item, size: CGSize(width: 88, height: 88), scale: displayScale)
         }
@@ -141,5 +154,42 @@ private struct FileTile: View {
             withAnimation(.easeOut(duration: 0.15)) { glow = 1 }
             withAnimation(.easeOut(duration: 0.9).delay(0.25)) { glow = 0 }
         }
+    }
+
+    private var symbol: String {
+        switch item.kind {
+        case .text: "text.alignleft"
+        case .link: "link"
+        case .reference, .copy: item.contentType == UTType.folder.identifier ? "folder" : "doc"
+        }
+    }
+
+    /// Size (or host, or word count) and when it was added: a time today, a date before.
+    private var meta: String {
+        let detail: String? = switch item.kind {
+        case .link: item.linkURL?.host
+        case .text: item.text.map { text in
+            let words = text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
+            return words == 1 ? "1 word" : "\(words) words"
+        }
+        case .reference, .copy:
+            item.byteCount.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) }
+                ?? (item.contentType == UTType.folder.identifier ? "Folder" : nil)
+        }
+        let added = Calendar.current.isDateInToday(item.addedAt)
+            ? item.addedAt.formatted(date: .omitted, time: .shortened)
+            : item.addedAt.formatted(.dateTime.month(.abbreviated).day())
+        return [detail, added].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private var help: String {
+        let kind = switch item.kind {
+        case .reference: "Reference to your file"
+        case .copy: "Saved copy"
+        case .text: "Text"
+        case .link: item.text ?? "Link"
+        }
+        let origin = item.origin == "picker" ? "added with Add" : item.origin == "drop" ? "dropped" : "added"
+        return "\(item.name)\n\(kind) · \(origin) \(item.addedAt.formatted(.relative(presentation: .named)))"
     }
 }
