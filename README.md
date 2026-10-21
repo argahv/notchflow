@@ -13,7 +13,12 @@ taps you on the shoulder only when something needs you, and disappears back into
   <img alt="Native SwiftUI and AppKit" src="https://img.shields.io/badge/native-SwiftUI%20%2B%20AppKit-black?style=flat-square">
   <img alt="No telemetry" src="https://img.shields.io/badge/telemetry-none-black?style=flat-square">
   <img alt="Apple silicon and Intel" src="https://img.shields.io/badge/Apple%20silicon%20%2B%20Intel-universal-black?style=flat-square">
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-black?style=flat-square"></a>
+  <a href="https://github.com/argahv/notchflow/actions/workflows/verify.yml"><img alt="Verify" src="https://github.com/argahv/notchflow/actions/workflows/verify.yml/badge.svg"></a>
 </p>
+
+<p align="center"><b>Developer preview, open source, and looking for Swift, SwiftUI, AppKit, macOS graphics and accessibility contributors.</b><br>
+<a href="CONTRIBUTING.md">How to contribute</a> · <a href="https://github.com/argahv/notchflow/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22">Good first issues</a> · <a href="https://github.com/argahv/notchflow/discussions">Discussions</a></p>
 
 ---
 
@@ -281,33 +286,68 @@ Events go to an owner-only local inbox; there's no listening port. See the [even
 
 ## Status
 
-**Developer preview.** NotchFlow is built and tested on a MacBook Air with a notch: 110 Swift and 24 Python
-tests, end-to-end hook checks, and frame-by-frame recordings of its transitions. The newest features (the
-portal, screenshots, actions, the agent heartbeat, the split island, Time Travel and the sound island) were
-run on a Debug build through the same code a drop, a screenshot or an output change goes through. Some
-things still need a person at the Mac: real drags from Finder, Safari, Mail and Photos, a real ⇧⌘4
-screenshot, a live Claude Code or Codex session with the hooks installed, AirPods connecting, and the
-trackpad gestures. See the [validation report](docs/obsidian-silver/02-validation.md),
+**Developer preview (0.1).** NotchFlow is built and tested on a MacBook Air with a notch: 110 Swift and 24
+Python tests run in CI on every push, alongside Debug and universal Release builds, plus end-to-end hook
+checks and frame-by-frame recordings of its transitions. The newest features (the portal, screenshots,
+actions, the agent heartbeat, the split island, Time Travel and the sound island) were run on a Debug build
+through the same code a drop, a screenshot or an output change goes through. Some things still need a person
+at the Mac: real drags from Finder, Safari, Mail and Photos, a real ⇧⌘4 screenshot, a live Claude Code or
+Codex session with the hooks installed, AirPods connecting, and the trackpad gestures. See the
+[validation report](docs/obsidian-silver/02-validation.md),
 [living notch progress](docs/implementation/living-notch-progress.md) and [progress](docs/implementation/progress.md).
 
 The screenshots on this page are the real app. They were captured over a neutral wallpaper and menu bar, so
 no personal desktop appears, and they use demo projects.
 
-## For contributors
+### Known limitations
+
+- **Tested on one Mac so far.** External displays, Macs without a notch, Spaces, full screen and Stage
+  Manager haven't had a full hands-on pass. Reports from other hardware are very welcome.
+- **Agent approvals and hooks** are covered by fixture tests, not yet by a long live Claude Code or Codex
+  session. You merge the hook snippet yourself; NotchFlow never edits agent config.
+- **Ultra glass is experimental.** The Metal "Ultra" surface needs Screen Recording permission, compiles its
+  shader at runtime, and hasn't been verified on screen. Balanced (the default) uses system materials.
+- **Accessibility is partial.** Labels, VoiceOver actions, Reduce Motion and Reduce Transparency are in;
+  a full VoiceOver pass, Increase Contrast and Differentiate Without Color aren't done yet.
+- **Memory over long sessions** grew from about 26 to 52 MB footprint in one measurement and hasn't been
+  investigated with Instruments yet.
+- **GitHub Actions** is polled (with ETags and rate-limit back-off), not pushed by webhooks.
+
+### Roadmap
+
+Near term, roughly in order. Each has or will get an issue:
+
+1. Hardware validation on more Macs and displays, and fixes for what turns up.
+2. A full accessibility pass: VoiceOver, keyboard, contrast, colour-independent status.
+3. Performance instrumentation (signposts, footprint in the profiler) and the long-session memory question.
+4. Smarter agent integration: better test-run detection, more agents through the [event contract](docs/INTEGRATIONS.md).
+5. Ultra glass: zero-copy frames, then on-screen verification.
+
+Not planned for now: accounts, cloud sync, telemetry, or sending anything you drop to an AI service.
+
+## Contributing
+
+NotchFlow is MIT licensed and contributions are welcome, from a one-line accessibility label to a Metal
+renderer. **We're looking for Swift, SwiftUI, AppKit, macOS graphics and accessibility contributors.**
+
+- [CONTRIBUTING.md](CONTRIBUTING.md): requirements, build, tests, architecture, conventions and the PR flow.
+- [Good first issues](https://github.com/argahv/notchflow/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+  and [help wanted](https://github.com/argahv/notchflow/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22).
+  Each lists the files, acceptance criteria and how to test.
+- Questions and ideas: [Discussions](https://github.com/argahv/notchflow/discussions).
+- Security: [SECURITY.md](SECURITY.md). Conduct: [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ```bash
-swift test
-```
-
-```bash
-python3 -I Tests/test_bridge.py
+swift test                          # NotchCore, on macOS
+python3 -I Tests/test_bridge.py     # the event CLI and agent hooks, on any OS
 ```
 
 - `Sources/NotchCore`: the testable core, covering the activity engine, ranking, geometry, GitHub mapping,
   context rules, content rules, and the rules behind the portal, shelf, screenshots, actions, agent pulse,
   split island, Time Travel and sound.
 - `Sources/NotchFlow`: the app. `Shell` (surface and layout), `Design` (tokens, silhouette, materials,
-  motion), `Surfaces` (features), `Features` (providers and services), `Window` (panel, input, geometry).
+  motion), `Surfaces` (features), `Features` (providers and services), `Window` (panel, input, geometry),
+  `Graphics` (experimental Metal glass).
 - `Scripts`: the project generator, the event CLI and agent hooks, and build and notarization scripts.
 
 Design and architecture: [Obsidian & Silver design](docs/obsidian-silver/01-design.md) · [dynamic hover](docs/obsidian-silver/03-dynamic-hover.md) ·
@@ -315,4 +355,7 @@ Design and architecture: [Obsidian & Silver design](docs/obsidian-silver/01-desi
 [context engine](docs/architecture/context-engine.md) · [motion](docs/design/motion-system.md) ·
 [acceptance tests](docs/testing/acceptance-tests.md).
 
-<p align="center"><sub>Original implementation; no proprietary source, assets or extracted shaders.</sub></p>
+## License
+
+[MIT](LICENSE) © 2026 Raghav Kattel. NotchFlow is an original implementation, with no proprietary source,
+assets or extracted shaders.
