@@ -98,6 +98,46 @@ final class SurfaceArbiterTests: XCTestCase {
     }
 }
 
+final class SurfaceCoordinationTests: XCTestCase {
+    let t0 = Date(timeIntervalSince1970: 2_000)
+
+    func testTheMostImportantWaitingGlanceGoesFirstThenTheMostRecent() {
+        let passive = WaitingGlance(.attention, tier: .passive, arrived: t0, expires: .distantFuture)
+        let screenshot = WaitingGlance(.capture, tier: .suggestion, arrived: t0.addingTimeInterval(1), expires: t0.addingTimeInterval(90))
+        let copy = WaitingGlance(.suggestion, tier: .suggestion, arrived: t0.addingTimeInterval(2), expires: t0.addingTimeInterval(45))
+        let failure = WaitingGlance(.attention, tier: .critical, arrived: t0, expires: .distantFuture)
+        XCTAssertEqual(SurfaceArbiter.next([passive, screenshot, copy], now: t0.addingTimeInterval(3))?.kind, .suggestion,
+                       "Of two things you just did, the latest")
+        XCTAssertEqual(SurfaceArbiter.next([passive, screenshot], now: t0.addingTimeInterval(3))?.kind, .capture,
+                       "A screenshot you just took before passive news")
+        XCTAssertEqual(SurfaceArbiter.next([passive, screenshot, copy, failure], now: t0.addingTimeInterval(3)), failure)
+    }
+
+    func testAWaitingGlanceThatExpiredIsNeverShownLate() {
+        let sound = WaitingGlance(.sound, tier: .passive, arrived: t0, expires: t0.addingTimeInterval(6))
+        let screenshot = WaitingGlance(.capture, tier: .suggestion, arrived: t0, expires: t0.addingTimeInterval(90))
+        XCTAssertEqual(SurfaceArbiter.next([sound], now: t0.addingTimeInterval(5))?.kind, .sound)
+        XCTAssertNil(SurfaceArbiter.next([sound], now: t0.addingTimeInterval(7)))
+        XCTAssertNil(SurfaceArbiter.next([screenshot], now: t0.addingTimeInterval(120)))
+    }
+
+    func testClosingTheShownAlertPromotesNothingSoNoAlertIsStuckAsCurrentUnseen() {
+        var center = AttentionCenter()
+        let first = AttentionItem(id: "a", priority: .actionRequired, arrived: t0)
+        let second = AttentionItem(id: "b", priority: .actionRequired, arrived: t0.addingTimeInterval(1))
+        XCTAssertEqual(center.receive(first, context: AttentionContext()), .present(first))
+        XCTAssertEqual(center.receive(second, context: AttentionContext()), .queue)
+        // dismissCurrent hands back the next item and makes it current; a caller that drops it leaves a ghost.
+        var ghost = center
+        XCTAssertEqual(ghost.dismissCurrent(now: t0.addingTimeInterval(10), context: AttentionContext())?.id, "b")
+        XCTAssertNil(ghost.resume(now: t0.addingTimeInterval(20), context: AttentionContext()), "The ghost blocks the queue")
+        center.closeCurrent()
+        XCTAssertNil(center.current)
+        XCTAssertEqual(center.pending.map(\.id), ["b"])
+        XCTAssertEqual(center.resume(now: t0.addingTimeInterval(10), context: AttentionContext())?.id, "b")
+    }
+}
+
 final class PrivacyCatalogTests: XCTestCase {
     func testEveryContextSourceIsDescribed() {
         let covered = PrivacyCatalog.entries.reduce(into: Set<ContextSource>()) { $0.formUnion($1.sources) }

@@ -86,11 +86,16 @@ public struct AttentionCenter: Sendable {
         return present(item)
     }
 
-    /// The glance closed. Returns the next item to present, if the context allows one now.
+    /// The glance closed. Returns the next item to present, if the context allows one now. The returned item
+    /// becomes current, so the caller must present it.
     public mutating func dismissCurrent(now: Date, context: AttentionContext) -> AttentionItem? {
         current = nil
         return resume(now: now, context: context)
     }
+
+    /// The glance closed and the caller decides what comes next (see `SurfaceArbiter.next`). Nothing pending
+    /// is promoted, so nothing can become current without being shown.
+    public mutating func closeCurrent() { current = nil }
 
     /// Called when the person stops editing or closes the workspace. Only items that still matter are replayed.
     public mutating func resume(now: Date, context: AttentionContext) -> AttentionItem? {

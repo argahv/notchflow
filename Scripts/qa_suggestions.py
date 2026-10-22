@@ -168,5 +168,44 @@ if scenario in ("all", "regression"):
     check("Notch Actions still run through the guard", "completed(" in s.get("action", "") and "wordCount" in s.get("action", ""), s.get("action"))
     send("close", "shelf:clear", wait=0.8)
 
+if scenario in ("all", "surface"):
+    # One coordinator for everything that waits: screenshots, sound changes, suggestions and alerts.
+    import shutil
+    shot = os.path.join(ROOT, "qa-shot.png")
+    shutil.copyfile(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "media", "resting.png"), shot)
+    send("suggest:on", "suggest:reset", "privacy:off", "quiet:off", "close", wait=1.0)
+    send("clip:#2E8B57", wait=1.0)
+    send(f"capture:{shot}", wait=1.2)
+    s = status()
+    check("a screenshot waits behind a suggestion", "suggestion(" in s.get("capture", "") and "capture/Suggestion" in s.get("waiting", ""),
+          f"{s.get('capture')} | {s.get('waiting')}")
+    send("suggest:dismiss", wait=1.6)
+    s = status()
+    check("then it takes the surface", "glance: capture(" in s.get("capture", ""), s.get("capture"))
+    send("sound:connected:QA Headphones", wait=1.0)
+    s = status()
+    check("a sound change waits behind the screenshot", "sound/Passive news" in s.get("waiting", ""), s.get("waiting"))
+    event("qa-fail-" + uuid.uuid4().hex[:6], "failed", "Deploy failed", category="deploy")
+    time.sleep(1.4)
+    s = status()
+    check("a failure takes the surface from the screenshot", "notification(" in s.get("capture", ""), s.get("capture"))
+    check("and the screenshot waits to come back", "capture/Suggestion" in s.get("waiting", ""), s.get("waiting"))
+    send("notification:dismiss", wait=1.6)
+    s = status()
+    check("after the failure the screenshot returns before the stale sound change", "glance: capture(" in s.get("capture", ""),
+          f"{s.get('capture')} | {s.get('waiting')}")
+    send("capture:dismiss", wait=1.5)
+    # Two alerts, Escape while the first shows: the second must still be shown (no alert stuck as current unseen).
+    first, second = "qa-a-" + uuid.uuid4().hex[:6], "qa-b-" + uuid.uuid4().hex[:6]
+    event(first, "failed", "First failure", category="ci")
+    time.sleep(1.2)
+    event(second, "failed", "Second failure", category="ci")
+    time.sleep(1.0)
+    send("event:dismiss", wait=1.8)
+    s = status()
+    check("after Escape the queued alert is shown", f'notification("qa:{second}")' in s.get("capture", ""), s.get("capture"))
+    send("notification:dismiss", "suggest:off", wait=0.8)
+    os.remove(shot)
+
 print()
 print(f"{sum(ok for _, ok, _ in results)}/{len(results)} checks passed")

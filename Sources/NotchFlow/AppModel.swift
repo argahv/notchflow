@@ -49,8 +49,13 @@ struct CommandItem: Identifiable {
     @Published private(set) var form = SurfaceForm(size: CGSize(width: 208, height: 37.5), ear: 3, corner: 10, inset: 1)
     @Published private(set) var glance: GlanceSubject = .summary {
         didSet {
-            // Something else took the surface from a suggestion (an alert, a screenshot): it was superseded.
-            guard case .suggestion = oldValue, glance != oldValue else { return }
+            guard glance != oldValue else { return }
+            // A transient glance ended: whatever waited gets its turn (see `resumeSurface`).
+            if glance == .summary { resumeSurface() }
+            // An alert took the surface from a screenshot just taken: it comes back afterwards, if still recent.
+            if case .capture = oldValue, case .notification = glance { captureWaiting = true }
+            // Something else took the surface from a suggestion: it was superseded.
+            guard case .suggestion = oldValue else { return }
             if case .suggestion(let id) = glance, id == suggestion?.id { return }
             suggestionLeftSurface()
         }
@@ -100,7 +105,7 @@ struct CommandItem: Identifiable {
     private var routeBeforeCommand: Route = .activity(detail: nil)
     private var hoverWork: DispatchWorkItem?
     private var dismissWork: DispatchWorkItem?
-    private var resumeWork: DispatchWorkItem?
+    private var surfaceWork: DispatchWorkItem?
     private var expiryWork: DispatchWorkItem?
     private var returnWork: DispatchWorkItem?
     private var openedByDrag = false
@@ -417,12 +422,24 @@ struct CommandItem: Identifiable {
     @Published private(set) var soundTransition: SoundTransition?
     private var soundWork: DispatchWorkItem?
 
+    /// When a sound change that had to wait arrived; it's shown within six seconds or not at all.
+    private var soundWaitingSince: Date?
+
     /// Sound moved to another output: a short glance with the device, its volume and a quick switch,
-    /// then the notch retracts. Waits like a screenshot does; quiet mode only lights the rim.
+    /// then the notch retracts. It's passive news: it waits behind anything showing or in use, and a newer
+    /// change replaces it in place. Quiet mode only lights the rim.
     func soundChanged(_ transition: SoundTransition) {
         guard preferences.soundIslandEnabled, !preferences.privacy else { return }
         soundTransition = transition
-        if preferences.quietMode || captureMustWait || captureGlanceShowing { illuminate(.silver); return }
+        if preferences.quietMode { illuminate(.silver); return }
+        if glance != .sound, SurfaceArbiter.admit(.passive, into: surfaceOccupancy) == .wait {
+            soundWaitingSince = Date(); illuminate(.silver); return
+        }
+        showSound()
+    }
+
+    private func showSound() {
+        soundWaitingSince = nil
         refreshAudioOutputs()
         var next = snapshot
         if next.interaction.presentation == .collapsed { next.interaction.send(.attention) }
@@ -642,11 +659,12 @@ struct CommandItem: Identifiable {
     private var attentionContext: AttentionContext {
         // A drag on its way in, a drop's result or a screenshot just taken has the surface: passive
         // arrivals wait and light the rim.
-        // A suggestion holds the surface against passive news but not against work that needs the person.
-        AttentionContext(editing: interaction.editing || interaction.portal != .closed || captureGlanceShowing || glance == .sound,
+        // A drag on its way in or a drop's result has the surface: everything waits and lights the rim. A screenshot,
+        // a suggestion or a sound change holds it against passive news, not against work that needs the person.
+        AttentionContext(editing: interaction.editing || interaction.portal != .closed,
                          expanded: interaction.presentation == .expanded,
                          suppressed: preferences.quietMode || preferences.privacy,
-                         holdBelow: SurfaceArbiter.lowestPriorityAdmitted(over: suggestionShowing ? .suggestion : nil))
+                         holdBelow: SurfaceArbiter.lowestPriorityAdmitted(over: transientTier))
     }
 
     func send(_ event: InteractionEvent) {
@@ -737,16 +755,16 @@ struct CommandItem: Identifiable {
     private func didCommit(from previous: PresentationSnapshot) {
         let now = interaction.presentation, was = previous.interaction.presentation
         if now == .collapsed && was != .collapsed {
-            if case .notification = glance { glance = .summary; celebration = nil; _ = attention.dismissCurrent(now: Date(), context: attentionContext) }
+            if case .notification = glance { glance = .summary; celebration = nil; attention.closeCurrent() }
             if case .capture = glance { glance = .summary; captureWork?.cancel() }
             if glance == .sound { glance = .summary; soundWork?.cancel() }
             if suggestionShowing { retireSuggestion(.ignored); glance = .summary }
             openedByDrag = false; dropTargeted = false
-            resumeCapture(); resumeAttention(); resumeSuggestion()
+            resumeSurface()
         }
-        if was == .expanded && now != .expanded { resumeCapture(); resumeAttention(); resumeSuggestion() }
-        if previous.interaction.editing && !interaction.editing { resumeCapture(); resumeAttention(); resumeSuggestion() }
-        if previous.interaction.portal != .closed && interaction.portal == .closed { resumeCapture(); resumeAttention(); resumeSuggestion() }
+        if was == .expanded && now != .expanded { resumeSurface() }
+        if previous.interaction.editing && !interaction.editing { resumeSurface() }
+        if previous.interaction.portal != .closed && interaction.portal == .closed { resumeSurface() }
         if let feature = route.feature {
             routeMemory[feature] = route
             if feature == .activity && now == .expanded { dockBadge = nil }
@@ -824,7 +842,7 @@ struct CommandItem: Identifiable {
         let item = AttentionItem(id: event.key, priority: AttentionPriority(state: event.lifecycle), arrived: Date())
         switch attention.receive(item, context: attentionContext) {
         case .present(let item): present(item)
-        case .queue: resumeAttention(after: max(0.6, (attention.nextEligible() ?? Date()).timeIntervalSinceNow + 0.05))
+        case .queue: resumeSurface(after: max(0.6, (attention.nextEligible() ?? Date()).timeIntervalSinceNow + 0.05))
         case .indicate:
             illuminate(event.lifecycle.tone)
             if item.priority.interrupts, !(interaction.presentation == .expanded && route.feature == .activity) {
@@ -846,7 +864,7 @@ struct CommandItem: Identifiable {
             switch completionPolicy.importance(of: completion, in: situation) {
             case .indicate:
                 illuminate(.green)
-                _ = attention.dismissCurrent(now: Date(), context: attentionContext); resumeAttention()
+                attention.closeCurrent(); resumeSurface()
                 return
             case .celebrate:
                 moment = Celebration(lead: item.id, batch: [completion], since: Date(),
@@ -878,11 +896,11 @@ struct CommandItem: Identifiable {
     func dismissNotification() {
         dismissWork?.cancel()
         guard case .notification = glance else { return }
-        let next = attention.dismissCurrent(now: Date(), context: attentionContext)
+        attention.closeCurrent()
         var snapshot = self.snapshot
         if snapshot.interaction.presentation == .preview, windows?.pointerInside != true { snapshot.interaction.send(.leave) }
         commit(snapshot, also: { self.glance = .summary; self.celebration = nil })
-        if let next { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.present(next) } }
+        resumeSurface(after: 0.5)
     }
 
     func viewNotificationDetails() {
@@ -893,17 +911,71 @@ struct CommandItem: Identifiable {
         windows?.focus()
     }
 
-    private func resumeAttention(after delay: TimeInterval = 0.6) {
-        resumeWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self, self.glance == .summary else { return }
-            if let next = self.attention.resume(now: Date(), context: self.attentionContext) { self.present(next) }
-            else if let eligible = self.attention.nextEligible(), eligible > Date() {
-                self.resumeAttention(after: eligible.timeIntervalSinceNow + 0.05)
-            }
-        }
-        resumeWork = work
+    // MARK: Surface coordination
+
+    /// The one place anything that had to wait gets the surface back: alerts, a screenshot, a suggestion, a
+    /// sound change. `SurfaceArbiter.next` picks the most important, then the most recent; nothing stale.
+    private func resumeSurface(after delay: TimeInterval = 0.4) {
+        surfaceWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.surfaceIsFree() }
+        surfaceWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func surfaceIsFree() {
+        guard glance == .summary else { return }
+        let now = Date()
+        // Quiet or private since they started waiting: what came from the person's own content goes.
+        if preferences.quietMode || preferences.privacy { pendingSuggestion = nil; captureWaiting = false; soundWaitingSince = nil }
+        var waiting = waitingGlances
+        while let next = SurfaceArbiter.next(waiting, now: now) {
+            waiting.removeAll { $0.kind == next.kind }
+            if next.kind == .attention {
+                // The alert queue keeps its own pace; if it isn't time yet, something else may go first.
+                if let item = attention.resume(now: now, context: attentionContext) { present(item); return }
+                if let eligible = attention.nextEligible(), eligible > now { resumeSurface(after: eligible.timeIntervalSince(now) + 0.05) }
+                continue
+            }
+            // Someone is using the notch; the transition that ends it calls back here.
+            guard SurfaceArbiter.admit(next.tier, into: surfaceOccupancy) == .show else { return }
+            switch next.kind {
+            case .capture: presentCapture()
+            case .suggestion: if let pending = pendingSuggestion { showSuggestion(pending) }
+            case .sound: showSound()
+            case .attention: break
+            }
+            return
+        }
+        pendingSuggestion = nil
+        if let capture, now.timeIntervalSince(capture.taken) >= 90 { captureWaiting = false }
+        soundWaitingSince = nil
+    }
+
+    /// Everything waiting for the surface, as the arbiter sees it.
+    var waitingGlances: [WaitingGlance] {
+        var waiting: [WaitingGlance] = []
+        if let item = attention.pending.max(by: { ($0.priority, $1.arrived) < ($1.priority, $0.arrived) }) {
+            waiting.append(WaitingGlance(.attention, tier: item.priority.surfaceTier, arrived: item.arrived, expires: .distantFuture))
+        }
+        if captureWaiting, let capture {
+            waiting.append(WaitingGlance(.capture, tier: .suggestion, arrived: capture.taken, expires: capture.taken.addingTimeInterval(90)))
+        }
+        if let pendingSuggestion {
+            waiting.append(WaitingGlance(.suggestion, tier: .suggestion, arrived: pendingSuggestion.created, expires: pendingSuggestion.expires))
+        }
+        if let soundWaitingSince {
+            waiting.append(WaitingGlance(.sound, tier: .passive, arrived: soundWaitingSince, expires: soundWaitingSince.addingTimeInterval(6)))
+        }
+        return waiting
+    }
+
+    /// The tier of a transient glance on screen that isn't an alert: what alerts must outrank to replace it.
+    private var transientTier: SurfaceTier? {
+        switch glance {
+        case .capture, .suggestion: .suggestion
+        case .sound: .passive
+        case .summary, .notification: nil
+        }
     }
 
     private func illuminate(_ tone: Tone) { illumination = Illumination(tone: tone) }
@@ -1569,16 +1641,10 @@ struct CommandItem: Identifiable {
         self.capture = capture
         captureText = .idle; annotatedCopy = nil; annotations = AnnotationDocument()
         if preferences.quietMode { illuminate(.silver); return }
-        if captureMustWait { captureWaiting = true; illuminate(.silver); return }
+        // A drag, an editor, the open workspace, the pointer or another glance keeps the surface; the screenshot
+        // waits and appears when it's free, if it's still recent (see `resumeSurface`).
+        if SurfaceArbiter.admit(.suggestion, into: surfaceOccupancy) == .wait { captureWaiting = true; illuminate(.silver); return }
         presentCapture()
-    }
-
-    /// A drag, an editor, an open workspace or another glance keeps the surface; the screenshot
-    /// waits and appears when it's free, if it's still recent.
-    private var captureMustWait: Bool {
-        if interaction.portal != .closed || interaction.editing || interaction.dragging || interaction.presentation == .expanded { return true }
-        if case .notification = glance { return true }
-        return false
     }
 
     private func presentCapture() {
@@ -1589,14 +1655,6 @@ struct CommandItem: Identifiable {
         commit(next, also: { self.glance = .capture(capture.id) })
         illuminate(.silver)
         scheduleCaptureDismiss()
-    }
-
-    private func resumeCapture() {
-        guard captureWaiting, let capture, Date().timeIntervalSince(capture.taken) < 90 else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            guard let self, self.captureWaiting, !self.captureMustWait, self.glance == .summary else { return }
-            self.presentCapture()
-        }
     }
 
     /// The preview leaves on its own after a while, but never from under the pointer.
@@ -1902,19 +1960,6 @@ struct CommandItem: Identifiable {
         scheduleSuggestionClose(after: 7)
     }
 
-    /// A suggestion that had to wait is shown when the surface is free, if it's still fresh. Work that needs
-    /// the person goes first.
-    private func resumeSuggestion() {
-        guard pendingSuggestion != nil else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            guard let self, let pending = self.pendingSuggestion, self.glance == .summary else { return }
-            // Quiet or private since it was queued, or too old to still be relevant: it goes.
-            guard pending.expires > Date(), !self.preferences.quietMode, !self.preferences.privacy else { self.pendingSuggestion = nil; return }
-            if self.attention.pending.contains(where: { $0.priority >= .actionRequired }) { return }
-            if SurfaceArbiter.admit(.suggestion, into: self.surfaceOccupancy) == .show { self.showSuggestion(pending) }
-        }
-    }
-
     /// The glance leaves on its own after a while, but never from under the pointer.
     private func scheduleSuggestionClose(after delay: TimeInterval) {
         suggestionWork?.cancel()
@@ -1936,7 +1981,6 @@ struct CommandItem: Identifiable {
         var next = snapshot
         if next.interaction.presentation == .preview, windows?.pointerInside != true { next.interaction.send(.leave) }
         commit(next, also: { self.retireSuggestion(outcome); self.glance = .summary })
-        resumeAttention()
     }
 
     /// Records the outcome and clears the suggestion, without touching the surface.

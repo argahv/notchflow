@@ -227,7 +227,8 @@ import AppKit
                    }.joined(separator: " "),
                    "inspector: " + model.contextEngine.log.prefix(6).map(\.text).joined(separator: " | "),
                    "learning: " + model.learnedRules.sorted { $0.key < $1.key }.map { "\($0.key) +\($0.value.accepted) -\($0.value.dismissed) ~\($0.value.ignored)" }.joined(separator: ", "),
-                   "clipboard: history \(model.clipboard.enabled) · items \(model.clipboard.items.count) · skipped \(model.clipboard.skipped)"]
+                   "clipboard: history \(model.clipboard.enabled) · items \(model.clipboard.items.count) · skipped \(model.clipboard.skipped)",
+                   "waiting: " + model.waitingGlances.map { "\($0.kind.rawValue)/\($0.tier.title)" }.joined(separator: ",")]
             try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)
         case "dumpHooks":
             let folder = AppFiles.root.appendingPathComponent("debug", isDirectory: true)

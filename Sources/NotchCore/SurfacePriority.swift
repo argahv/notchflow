@@ -68,6 +68,26 @@ public enum SurfaceArbiter {
     }
 }
 
+/// Something that couldn't take the surface when it arrived and is waiting for it to be free.
+public struct WaitingGlance: Equatable, Sendable {
+    public enum Kind: String, Sendable { case attention, capture, suggestion, sound }
+    public var kind: Kind
+    public var tier: SurfaceTier
+    public var arrived: Date
+    /// Past this it's dropped rather than shown late.
+    public var expires: Date
+    public init(_ kind: Kind, tier: SurfaceTier, arrived: Date, expires: Date) {
+        self.kind = kind; self.tier = tier; self.arrived = arrived; self.expires = expires
+    }
+}
+
+extension SurfaceArbiter {
+    /// Which waiting glance takes a free surface: the highest tier, then the most recent. Nothing expired.
+    public static func next(_ waiting: [WaitingGlance], now: Date) -> WaitingGlance? {
+        waiting.filter { $0.expires > now }.max { ($0.tier, $0.arrived) < ($1.tier, $1.arrived) }
+    }
+}
+
 extension AttentionPriority: CaseIterable {
     public static var allCases: [AttentionPriority] { [.silent, .background, .informational, .actionRequired, .critical] }
 }
