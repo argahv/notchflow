@@ -63,7 +63,7 @@ clears that build's settings.
 ## Tests
 
 ```bash
-swift test                          # 110 tests for NotchCore (macOS)
+swift test                          # 159 tests for NotchCore (macOS)
 python3 -I Tests/test_bridge.py     # 24 tests for the event CLI and agent hooks (any OS)
 ```
 
@@ -123,7 +123,8 @@ Key ideas:
 
 Deeper reading: [activity engine](docs/architecture/activity-engine.md) ·
 [agent integrations](docs/architecture/agent-integrations.md) ·
-[context engine](docs/architecture/context-engine.md) · [motion](docs/design/motion-system.md) ·
+[context engine](docs/architecture/context-engine.md) · [Sixth Sense: suggestions, actions, privacy](docs/sixth-sense/01-architecture.md) ·
+[motion](docs/design/motion-system.md) ·
 [design as built](docs/obsidian-silver/01-design.md) · [dynamic hover](docs/obsidian-silver/03-dynamic-hover.md) ·
 [security and privacy](docs/security/integrations.md) · [acceptance tests](docs/testing/acceptance-tests.md).
 
@@ -211,6 +212,12 @@ printf 'nowplaying:Night Drive|Demo Artist\nhover:enter\n' > ~/Library/Applicati
 
 The full command list lives in [`Window/DebugChannel.swift`](Sources/NotchFlow/Window/DebugChannel.swift)
 (documenting it is [a help-wanted task](https://github.com/argahv/notchflow/issues/10)).
+
+Suggestions have a scripted acceptance run: start a sandboxed Debug build as above, then
+`python3 -I Scripts/qa_suggestions.py "$PWD/build/sandbox-data"`. It feeds copies through the clipboard
+filters (never your real clipboard), posts activity to the sandbox inbox only, prints a pass or fail per
+check, and leaves snapshots in `build/sandbox-data/debug`. New suggestion rules need a unit test in
+`IntentEngineTests` and, when they change what's on screen, a check there.
 To post realistic activity, use the event CLI:
 
 ```bash

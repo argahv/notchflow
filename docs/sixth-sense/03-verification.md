@@ -1,0 +1,83 @@
+# Sixth Sense: verification record
+
+Run on 2026-10-22, macOS 27.0 (26A428), Xcode 27.1 (27A9275), Swift 6.4 toolchain, Apple silicon, on
+`feature/sixth-sense`.
+
+## Builds and automated tests
+
+| Check | Command | Result |
+|---|---|---|
+| NotchCore unit tests | `swift test` | **159 passed**, 0 failed (110 before this branch, 49 new) |
+| Bridge and hook tests | `python3 -I Tests/test_bridge.py` | 24 passed |
+| Generated project is current | `python3 Scripts/generate_project.py && git diff --exit-code NotchFlow.xcodeproj` | Clean |
+| Debug build | `xcodebuild … -configuration Debug build` | Succeeded; no new warnings in changed files |
+| Universal Release build | `bash Scripts/build.sh` | Succeeded; `lipo -archs`: `x86_64 arm64` |
+
+New test files: `ContextEventTests.swift` (gate, privacy classes, entity detection, color math, JSON
+formatting, link cleaning, secret filter), `IntentEngineTests.swift` (every rule's actions and reasons,
+every hold reason, cooldowns, dismissal backoff and muting, learning bounds, hourly cap, sensitivity,
+reset, no content in stored learning), `ActionCatalogTests.swift` (catalog agrees with the shown effects,
+unique ids, nothing destructive, only Fetch Title uses the network, permission and confirmation checks,
+surface tiers including the attention hold, privacy catalog coverage).
+
+## End-to-end in the running app
+
+A Debug build ran with its own bundle id (`com.argahv.notchflow.dev`) and data folder
+(`NOTCHFLOW_APP_SUPPORT`), driven through the Debug channel by [`Scripts/qa_suggestions.py`](../../Scripts/qa_suggestions.py).
+Copies enter at `ClipboardService.consider`, the same filters a real copy goes through. Activity events
+were written to the sandbox inbox as owner-only JSON, as agents and the CLI do. **26 of 26 checks passed:**
+
+- Turning copy suggestions on starts the clipboard source; turning them off stops it.
+- A tracked link copied in Xcode is suggested, with Copy Clean Link first; Why? opens and deepens the shape.
+- Dismissing closes the glance and is learned; a second link right after is held as cooling down.
+- A color is suggested with RGB and HSL and a swatch; a JSON copy replaces it in place.
+- Under More, a long passage is suggested; Keep on Shelf adds a shelf item and shows Undo; Undo removes it;
+  the acceptance is learned.
+- During a drag the suggestion waits and appears once the drag goes away.
+- A finished build waits behind a showing suggestion; a CI failure takes the surface from it, and the
+  suggestion counts as superseded, not dismissed.
+- With Hide private details on, nothing is suggested and the inspector says why, without any copied content.
+- Password-manager and secret-looking copies are skipped before the engine sees them.
+- Notch Actions (Count Words on dropped text) still run, now through `ActionGuard`.
+
+Rendered snapshots of the link, Why?, color, JSON, kept-on-shelf and failure states were reviewed. They
+showed one real defect (action pills truncated to "Co…" and "O…"), fixed by keeping the controls at their
+natural size and giving the glance its own wing. Snapshots come from `ImageRenderer`, which can't draw
+AppKit-backed views: the material behind the glance and the borderless More menu render as placeholders
+there, as they do for the existing capture glance.
+
+## Measurements
+
+Debug build, collapsed at rest, 30 one-second `top` samples per state, `footprint` for memory:
+
+| State | Mean CPU | Idle wakeups | Footprint |
+|---|---|---|---|
+| Copy suggestions off | 0.00 % | 0.17 / s | 33 MB |
+| Copy suggestions on (pasteboard checked once a second) | 0.00 % | 0.13 / s | 33 MB |
+
+The difference is within noise. Instruments was not run. These are Debug numbers on one machine.
+
+## Not verified, and why
+
+| Not verified | Why |
+|---|---|
+| The real pasteboard check firing on a real copy | It would mean writing to the clipboard of the person using this Mac. The check is the existing code clipboard history uses; this branch only widened when it runs. Verify by hand: turn on Suggest from what you copy, copy `#0A84FF`. |
+| Copy actions (Copy Clean Link, Copy as RGB/HSL, Copy Formatted) and their Undo | Same reason. They write through `ClipboardService.write`, the same own-change path as Copy Again, so NotchFlow doesn't re-read its own write. |
+| Hand-offs to Maps, Mail, Phone and Finder | They open other apps. The handlers were resolved with `NSWorkspace.urlForApplication(toOpen:)`: `maps://` → Maps, `tel:` → Phone, `mailto:` → the default mail handler. |
+| Remind Me, including the Reminders permission prompt | It writes to the person's Reminders and needs their approval. |
+| VoiceOver announcement and reading order of the glance | Not tested with VoiceOver running. |
+| Reduce Motion, multiple displays, full-screen apps | The glance uses the shared reveal and surface motion, which already honor Reduce Motion, and the shared display geometry, but this branch didn't recheck them on screen. |
+| Light and dark wallpaper | The glance is drawn on the obsidian surface like every other glance; not rechecked on screen. |
+
+## Known limitations
+
+- Two context sources only: the app in front and the clipboard. Others are on the roadmap in
+  [02-plan.md](02-plan.md), and none is described as working.
+- Suggestions come from copies only. Downloads and screenshots keep their existing glances.
+- The engine can't know macOS Focus state, another app's microphone or camera, or whether the screen is
+  shared. Quiet mode, quiet hours and Hide private details are the controls.
+- The secret filter is best effort, as before. Exclusions and Hide private details are the reliable
+  controls.
+- Escape while a suggestion shows counts as ignored, not dismissed, so it never backs a rule off.
+- The glance's buttons are reachable with the pointer and VoiceOver. The non-activating panel doesn't take
+  keyboard focus for a glance, as with every other glance; ⌃⌥Space opens the workspace.

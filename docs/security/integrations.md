@@ -1,8 +1,10 @@
 # Security and privacy of integrations
 
 NotchFlow is local-first. It has no account, telemetry, analytics or remote service of its own, and opens no
-listening sockets. The only network requests it makes are to `api.github.com`, for repositories you add, and
-only when GitHub Actions is on.
+listening sockets. It makes network requests in two cases only: to `api.github.com`, for repositories you add,
+while GitHub Actions is on; and to a link's own website when you choose Fetch Title on it. Suggestions are
+decided by rules on the Mac and never use the network. Settings › What NotchFlow observes lists every
+capability, generated from `NotchCore/PrivacyCatalog.swift`.
 
 ## Trust boundary
 
@@ -21,6 +23,10 @@ directly. NotchFlow doesn't claim to defend against that.
 | Approval answers | `…/responses/<id>.json` | Consumed by the hook; swept after 15 min | `{requestId, nonce, decision, timestamp}` |
 | Notes, to-dos, shelf | SwiftData store in the same folder | Until deleted | Shelf keeps file references, not copies |
 | Clipboard history | Memory only | Retention setting (1 h–1 week), 40 items, gone on quit | Off by default |
+| Copy suggestions | Memory only | The copy is held while its suggestion waits (≤ 45 s) or shows | Off by default; same filters as history; content-derived dedupe keys are in-memory hashes, dropped after 10 min |
+| Suggestion learning | `UserDefaults` key `intentLearning` | Until Settings › Suggestions › Reset Learning | Per kind of suggestion: accepted, dismissed, ignored, current dismissal streak, last dismissal time. No content, no app names |
+| Context Inspector log | Memory only | Last 80 lines | Source names, lengths, kinds of suggestion and scores; never what was copied |
+| Excluded clipboard apps | `UserDefaults` | Until removed | Bundle identifiers |
 | GitHub token | Login Keychain, this device only | Until removed | Sent only to `api.github.com`; never logged or shown again |
 | Preferences | `UserDefaults` | — | Repositories you follow; no secrets |
 

@@ -45,7 +45,7 @@ for Settings. `ContextEngine` starts an observer only while a feature that consu
 
 | Observer | Runs while | Mechanism |
 |---|---|---|
-| Frontmost app | "Follow the app in front" **or** suggestions are on | `NSWorkspace.didActivateApplicationNotification`; no polling |
+| Frontmost app | "Follow the app in front" is on (a copy carries the app it was made in, so suggestions don't need this observer) | `NSWorkspace.didActivateApplicationNotification`; no polling |
 | Clipboard | clipboard history **or** copy suggestions are on | the existing `changeCount` comparison (macOS has no change notification); one shared poll |
 
 ## ADR-4 · Intent is rules-first, explainable, and works with no model configured
@@ -72,17 +72,24 @@ repeated dismissals, the same content suggested recently, the hourly cap.
 **Learning is minimal and resettable.** `IntentLearning` stores, per rule id, counts of accepted,
 dismissed and ignored suggestions, the current run of consecutive dismissals, and two timestamps. No
 content, no app names, no history. Consecutive dismissals back off exponentially (2, 4, 8, 16 minutes…)
-and five in a row mute the rule until the person resets learning or accepts one from the Inspector.
-Dedupe keys and recent-prompt times live in `IntentSession`, which is memory only.
+and five in a row mute the rule until the person resets learning or unmutes it in Settings, which forgets
+that rule's dismissals. Dedupe keys and recent-prompt times live in `IntentSession`, which is memory only.
+Reset Learning clears both.
+
+Each prompt in the last hour lowers the next score by 0.05, so under Balanced a mid-scoring rule stops
+appearing after two or three suggestions in an hour, while strong or often-used ones still get through. The
+hourly cap of six is the hard ceiling.
 
 ## ADR-5 · Actions declare their capability; execution stays where it is
 
 `ActionCatalog` (`NotchCore/ActionCatalog.swift`) gives every action, the 31 existing `ContentAction`s and
 the new `SuggestedAction`s, one `ActionDescriptor`: inputs, outputs, required permissions, impact,
-confirmation, cancellation and undo. `ActionGuard.clearance` is the single check before anything runs. It
-returns missing permissions (which the glance turns into a contextual "Allow …" button), requires
-confirmation for anything destructive whatever the descriptor says, and refuses network access unless the
-descriptor declares it.
+confirmation, cancellation and undo. `ActionGuard.clearance` is the single check before anything runs, in
+both runners. It returns missing permissions, which the suggestion asks macOS for in context before
+continuing, and requires confirmation for anything destructive whatever the descriptor says. Nothing in
+either catalog is destructive today, and a test keeps it that way. Network use is declared (`impact:
+.network`, only Fetch Title) and tested; it isn't enforced at run time, because no runner has a network
+path except that one action.
 
 **Why not rewrite the executor:** `ContentActionRunner` and `ActionRun` already handle tokens,
 progress, cancellation and undo correctly. The brief's gap was declaration and a capability boundary, not

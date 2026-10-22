@@ -1410,6 +1410,11 @@ struct CommandItem: Identifiable {
     func perform(_ action: ContentAction) {
         let items = actionItems
         guard let first = items.first, let context = actionContext, ActionRegistry.actions(for: context).contains(action) else { return }
+        // The one capability check every action passes. Notch Actions need no permission and never change an
+        // original, so this only ever refuses one that was declared otherwise without a confirmation step.
+        guard ActionGuard.clearance(for: ActionCatalog.descriptor(for: action), granted: [], confirmed: false) == .run else {
+            message = "\(action.title) needs a confirmation the notch can't ask for yet."; return
+        }
         // Opening something elsewhere isn't a run with a result.
         switch action {
         case .quickLook: quickLook(first); return
