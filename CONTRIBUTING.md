@@ -63,7 +63,7 @@ clears that build's settings.
 ## Tests
 
 ```bash
-swift test                          # 181 tests for NotchCore (macOS)
+swift test                          # 190 tests for NotchCore (macOS)
 python3 -I Tests/test_bridge.py     # 24 tests for the event CLI and agent hooks (any OS)
 ```
 
@@ -215,7 +215,7 @@ The full command list lives in [`Window/DebugChannel.swift`](Sources/NotchFlow/W
 
 Suggestions have a scripted acceptance run: start a sandboxed Debug build as above, then
 `python3 -I Scripts/qa_suggestions.py "$PWD/build/sandbox-data"` (scenarios: basic, shelf, coordination, regression,
-surface, modes, downloads, focus). It ignores the real pointer and scripts the app in front for the run,
+surface, modes, downloads, focus, chains). It ignores the real pointer and scripts the app in front for the run,
 so using the Mac meanwhile doesn't change results. It feeds copies through the clipboard
 filters (never your real clipboard), posts activity to the sandbox inbox only, prints a pass or fail per
 check, and leaves snapshots in `build/sandbox-data/debug`. New suggestion rules need a unit test in

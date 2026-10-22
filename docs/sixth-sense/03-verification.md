@@ -7,7 +7,7 @@ Run on 2026-10-22, macOS 27.0 (26A428), Xcode 27.1 (27A9275), Swift 6.4 toolchai
 
 | Check | Command | Result |
 |---|---|---|
-| NotchCore unit tests | `swift test` | **181 passed**, 0 failed (110 before this branch, 71 new) |
+| NotchCore unit tests | `swift test` | **190 passed**, 0 failed (110 before this branch, 80 new) |
 | Bridge and hook tests | `python3 -I Tests/test_bridge.py` | 24 passed |
 | Generated project is current | `python3 Scripts/generate_project.py && git diff --exit-code NotchFlow.xcodeproj` | Clean |
 | Debug build | `xcodebuild … -configuration Debug build` | Succeeded; no new warnings in changed files |
@@ -32,7 +32,7 @@ A Debug build ran with its own bundle id (`com.argahv.notchflow.dev`) and data f
 Copies enter at `ClipboardService.consider`, the same filters a real copy goes through. Activity events
 were written to the sandbox inbox as owner-only JSON, as agents and the CLI do. The app in front was
 scripted through the same gate as the real observer, and the real pointer was ignored for the run.
-**58 of 58 checks passed, twice in a row**, across eight scenarios:
+**67 of 67 checks passed** across nine scenarios (58 of 58 twice in a row before the chains scenario was added):
 
 - Turning copy suggestions on starts the clipboard source; turning them off stops it.
 - A tracked link copied in Xcode is suggested, with Copy Clean Link first; Why? opens and deepens the shape.
@@ -78,6 +78,22 @@ natural size and giving the glance its own wing. Snapshots come from `ImageRende
 AppKit-backed views: the material behind the glance and the borderless More menu render as placeholders
 there, as they do for the existing capture glance.
 
+- Action Chains: two real images run through Web-Ready Images; both results reach the shelf, the resized copies
+  made in between are gone, the originals are byte for byte unchanged, and the chain is a completed task in
+  History. The Next Action then offers Create ZIP, which makes one archive holding both results. A copied link
+  offers QR Code, which makes a PNG on the shelf and offers Copy next. ⌘K finds it.
+
+### Real-path checks
+
+On request, the paths the scripted suite avoids were run for real, with the clipboard backed up first and
+restored afterwards (same item, same four types, same sizes; macOS lists the types in a different order).
+**11 of 11 passed:** a real `pbcopy` reached the engine through the once-a-second pasteboard check; Copy as
+RGB wrote the real clipboard and NotchFlow didn't read its own write back; Undo restored the copy; a real
+tracked link (copied with a browser in front, so no Open was offered) became the cleaned link on the
+clipboard; Archive Utility really expanded a finished download's ZIP next to it and kept the archive; and
+Review on a focus summary opened History. A clipboard history in any other NotchFlow running at the time
+would have seen those test copies.
+
 ## Measurements
 
 Debug build, collapsed at rest, 30 one-second `top` samples per state, `footprint` for memory:
@@ -95,12 +111,11 @@ check only while a mode change is pending), and they weren't measured again.
 
 | Not verified | Why |
 |---|---|
-| The real pasteboard check firing on a real copy | It would mean writing to the clipboard of the person using this Mac. The check is the existing code clipboard history uses; this branch only widened when it runs. Verify by hand: turn on Suggest from what you copy, copy `#0A84FF`. |
-| Copy actions (Copy Clean Link, Copy as RGB/HSL, Copy Formatted) and their Undo | Same reason. They write through `ClipboardService.write`, the same own-change path as Copy Again, so NotchFlow doesn't re-read its own write. |
 | Hand-offs to Maps, Mail, Phone and Finder | They open other apps. The handlers were resolved with `NSWorkspace.urlForApplication(toOpen:)`: `maps://` → Maps, `tel:` → Phone, `mailto:` → the default mail handler. |
 | Remind Me, including the Reminders permission prompt | It writes to the person's Reminders and needs their approval. |
-| Extract on a real archive | It launches Archive Utility on this Mac. The handler path was checked to exist; the hand-off is one `NSWorkspace.open` call. |
-| The Review button after a focus session, and a real Download Center download | Review's navigation wasn't clicked by the script; downloads were posted as activity events, not saved by a browser into ~/Downloads. |
+| A real Download Center download | Downloads were posted as activity events, not saved by a browser into ~/Downloads. |
+| Copy Formatted and Copy as HSL on the real clipboard | Same write path as Copy as RGB and Copy Clean Link, which were checked for real. |
+| Cancelling a chain partway through | The cleanup on cancel is unit-tested (`ChainArtifacts.abandon`, files in flight), but the presets finish too fast on small images to cancel by hand in the script. |
 | A focus session's end while typing | Mission Complete then only lights the rim, as it always has; the summary is in History but not shown. Not rechecked. |
 | VoiceOver announcement and reading order of the glance | Not tested with VoiceOver running. |
 | Reduce Motion, multiple displays, full-screen apps | The glance uses the shared reveal and surface motion, which already honor Reduce Motion, and the shared display geometry, but this branch didn't recheck them on screen. |

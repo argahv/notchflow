@@ -84,6 +84,21 @@ Phase 1 acceptance criteria from the brief:
 | Predictive ranking improvements | Partly: per-rule learning, work-mode tilt and finished downloads. More sources are below. |
 | Voice, Teach My Mac, companion | Not started (below). |
 
+## Sixth Sense 2.0, merged into this plan
+
+The continuation brief's items are folded into the same phases rather than a second roadmap. State and
+collisions are in [04-expansion.md](04-expansion.md).
+
+| Priority | Item | Status |
+|---|---|---|
+| A | Shared artifact and action contract, workflow execution, Next Action, Live Activity reporting | **Done** (ADR-10) |
+| B | Action Chains (four presets), Magic Drop batch workflows, QR Bridge, Create ZIP, ⌘K over shelf and clipboard | **Done** |
+| B | Color Sense palette, Memory Shelf OCR search | Planned |
+| C | Agent Rescue (a reviewable handoff brief for a failed run), Presentation Mode (named, with a shortcut), Intent Switch 2.0 (secondary activity alongside the mode) | Planned, next |
+| C | Workspace Time Machine | Planned; needs Accessibility for window frames, asked only when turned on |
+| D | Pocket-to-Notch, Smart Cleanup, saved chains (Teach My Mac), extension SDK, voice | Planned |
+| E | Notch Companions, workspace previews | Experiments, not scheduled |
+
 ## Phase 3–5: roadmap
 
 Ordered by priority. Each item lists what it builds on and the platform reality.
@@ -112,3 +127,5 @@ Ordered by priority. Each item lists what it builds on and the platform reality.
 7. `Suggest a next step for finished downloads, and say what waited during a focus session`, plus a Debug switch
    that ignores the real pointer during scripted runs.
 8. Documentation for 7.
+9. On `feature/sixth-sense-expansion`: the chain and Next Action core; then Action Chains, Next Action, QR Code,
+   Create ZIP and ⌘K search in the app; then this documentation.

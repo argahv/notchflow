@@ -166,6 +166,25 @@ pauses counting as focus. The session's end is the existing Mission Complete mom
 replayed one glance at a time: it's in the stack and History. macOS offers no public way to hold other apps'
 notifications or read Focus, so this covers NotchFlow's own previews only.
 
+## ADR-10 · One action, artifact and workflow contract for Action Chains and the Next Action
+
+The 2.0 brief asks for a common artifact model, action registry, workflow engine, activity reporting and
+privacy enforcement. Each already existed in some form, so none was built twice:
+
+- **Artifacts** are `ContentKind` plus where the thing lives (`ShelfFile`). `ActionChains.output(of:from:)`
+  says what each Notch Action makes from what, which is the only new piece the chaining needs.
+- **The registry** stays `ActionRegistry` (what fits) and `ActionCatalog` (what it may do).
+- **A chain** is a validated list of existing `ContentAction`s run by the existing `ActionExecutor` under one
+  `ActionRun` attempt (`advance(to:)` moves it to the next step). `ChainArtifacts` keeps only the last step's
+  files; what's made in between, including files still being made when a run is cancelled, is removed with
+  `ShelfService.deleteCopy`, which refuses anything outside the shelf folder, so originals can't be touched.
+- **Every step passes `ActionGuard`** before the chain starts, so a chain can't do what its steps couldn't.
+- **Progress** is published as an ordinary `ActivityEvent`, so a chain is a task in the stack and History.
+- **The Next Action** is a pure rule over what was just made, offered in the result and never run by itself.
+
+Saved, user-defined chains (Teach My Mac) and extension-provided steps are the next consumers of the same
+contract; see [04-expansion.md](04-expansion.md).
+
 ## What this branch deliberately does not do
 
 - No LLM summarise/rewrite: the brief makes them conditional on a configured provider, and none exists.
