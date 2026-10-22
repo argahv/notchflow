@@ -104,6 +104,8 @@ public enum ActionCatalog {
         case .extractFrame: return file([.video], makes: [.image])
         case .convertM4A: return file([.audio, .video], makes: [.audio])
         case .compressVideo: return file([.video], makes: [.video])
+        case .qrCode: return file([.link], makes: [.image])
+        case .createArchive: return file([.collection, .folder, .file], makes: [.file])
         }
     }
 

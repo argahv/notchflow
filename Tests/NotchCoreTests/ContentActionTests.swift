@@ -45,9 +45,10 @@ final class ContentActionTests: XCTestCase {
     }
 
     func testCollectionsOfferMergeOnlyForSeveralPDFs() {
-        XCTAssertEqual(ActionRegistry.actions(for: ContentClassifier.collection([.pdf, .pdf, .pdf])), [.mergePDFs])
-        XCTAssertTrue(ActionRegistry.actions(for: ContentClassifier.collection([.pdf, .image])).isEmpty)
-        XCTAssertTrue(ActionRegistry.actions(for: ContentClassifier.collection([.pdf])).isEmpty)
+        // Any collection of files can also go into one archive (Create ZIP); merging needs two or more PDFs.
+        XCTAssertEqual(ActionRegistry.actions(for: ContentClassifier.collection([.pdf, .pdf, .pdf])), [.mergePDFs, .createArchive])
+        XCTAssertEqual(ActionRegistry.actions(for: ContentClassifier.collection([.pdf, .image])), [.createArchive])
+        XCTAssertFalse(ActionRegistry.actions(for: ContentClassifier.collection([.pdf])).contains(.mergePDFs))
     }
 
     func testCollectionsAreNamedForWhatTheyHold() {
