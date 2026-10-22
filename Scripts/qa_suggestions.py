@@ -5,7 +5,7 @@ Debug builds only, with their own data folder so nothing reaches your real shelf
     xcodebuild -project NotchFlow.xcodeproj -scheme NotchFlow -configuration Debug -derivedDataPath build/Sandbox \
       PRODUCT_BUNDLE_IDENTIFIER=com.argahv.notchflow.dev CODE_SIGNING_ALLOWED=NO build
     NOTCHFLOW_APP_SUPPORT="$PWD/build/sandbox-data" build/Sandbox/Build/Products/Debug/NotchFlow.app/Contents/MacOS/NotchFlow &
-    python3 -I Scripts/qa_suggestions.py "$PWD/build/sandbox-data" [all|basic|shelf|coordination|regression]
+    python3 -I Scripts/qa_suggestions.py "$PWD/build/sandbox-data" [all|basic|shelf|coordination|regression|surface|modes]
 
 Copies are fed to ClipboardService.consider (the filters a real copy passes), so the real clipboard is never
 read or written. Activity events are written to the sandbox inbox only. Snapshots land in <data>/debug/*.png.

@@ -7,7 +7,7 @@ Run on 2026-10-22, macOS 27.0 (26A428), Xcode 27.1 (27A9275), Swift 6.4 toolchai
 
 | Check | Command | Result |
 |---|---|---|
-| NotchCore unit tests | `swift test` | **159 passed**, 0 failed (110 before this branch, 49 new) |
+| NotchCore unit tests | `swift test` | **170 passed**, 0 failed (110 before this branch, 60 new) |
 | Bridge and hook tests | `python3 -I Tests/test_bridge.py` | 24 passed |
 | Generated project is current | `python3 Scripts/generate_project.py && git diff --exit-code NotchFlow.xcodeproj` | Clean |
 | Debug build | `xcodebuild … -configuration Debug build` | Succeeded; no new warnings in changed files |
@@ -18,14 +18,17 @@ formatting, link cleaning, secret filter), `IntentEngineTests.swift` (every rule
 every hold reason, cooldowns, dismissal backoff and muting, learning bounds, hourly cap, sensitivity,
 reset, no content in stored learning), `ActionCatalogTests.swift` (catalog agrees with the shown effects,
 unique ids, nothing destructive, only Fetch Title uses the network, permission and confirmation checks,
-surface tiers including the attention hold, privacy catalog coverage).
+surface tiers including the attention hold, which waiting glance goes next, the stuck-alert pitfall,
+privacy catalog coverage), `WorkModeTests.swift` (what each signal points to, switching signals off,
+Study never inferred, hysteresis, calls switching at once, shortcuts per mode, the mode's tilt on scores).
 
 ## End-to-end in the running app
 
 A Debug build ran with its own bundle id (`com.argahv.notchflow.dev`) and data folder
 (`NOTCHFLOW_APP_SUPPORT`), driven through the Debug channel by [`Scripts/qa_suggestions.py`](../../Scripts/qa_suggestions.py).
 Copies enter at `ClipboardService.consider`, the same filters a real copy goes through. Activity events
-were written to the sandbox inbox as owner-only JSON, as agents and the CLI do. **26 of 26 checks passed:**
+were written to the sandbox inbox as owner-only JSON, as agents and the CLI do. The app in front was
+scripted through the same gate as the real observer. **46 of 46 checks passed** across five scenarios:
 
 - Turning copy suggestions on starts the clipboard source; turning them off stops it.
 - A tracked link copied in Xcode is suggested, with Copy Clean Link first; Why? opens and deepens the shape.
@@ -39,6 +42,24 @@ were written to the sandbox inbox as owner-only JSON, as agents and the CLI do. 
 - With Hide private details on, nothing is suggested and the inspector says why, without any copied content.
 - Password-manager and secret-looking copies are skipped before the engine sees them.
 - Notch Actions (Count Words on dropped text) still run, now through `ActionGuard`.
+- A screenshot waits behind a suggestion, then takes the surface; a sound change waits behind the
+  screenshot; a deploy failure takes the surface from the screenshot, which comes back after it, ahead of
+  the now-stale sound change.
+- Two failures in a row and Escape while the first shows: the second is still shown (the stuck-alert fix).
+- A new app in front is pending at first and becomes Developer once it holds, with "Xcode is in front".
+  Developer offers Activity, Clipboard and Shelf and ranks agents, builds and CI first. A glance at Figma and
+  back doesn't flip it.
+- Pinning Creative wins over inference and lifts a copied color to 0.83.
+- A call in progress switches to Meeting at once, offers Calendar, Notes and Sound, ranks the call first and
+  holds a link suggestion; when the call ends the mode settles back to Developer. With following off, it's
+  General.
+
+**A note on running these on a Mac in use.** The sandboxed build draws its panel over the same notch as any
+installed NotchFlow, and its observers see the real Mac. In early runs a real click on the panel accepted a
+suggestion, and a real browser coming to the front moved the work mode, which both upset the script.
+Neither was a defect. The Debug channel now lets a script own the app-in-front source (`front:` until
+`front:real`). Pointer input over the notch still can't be excluded, so run the script without touching
+the notch.
 
 Rendered snapshots of the link, Why?, color, JSON, kept-on-shelf and failure states were reviewed. They
 showed one real defect (action pills truncated to "Co…" and "O…"), fixed by keeping the controls at their
@@ -55,7 +76,9 @@ Debug build, collapsed at rest, 30 one-second `top` samples per state, `footprin
 | Copy suggestions off | 0.00 % | 0.17 / s | 33 MB |
 | Copy suggestions on (pasteboard checked once a second) | 0.00 % | 0.13 / s | 33 MB |
 
-The difference is within noise. Instruments was not run. These are Debug numbers on one machine.
+The difference is within noise. Instruments was not run. These are Debug numbers on one machine. They
+were taken before the coordinator and work modes; neither adds a timer at rest (work modes schedule one
+check only while a mode change is pending), and they weren't measured again.
 
 ## Not verified, and why
 
@@ -79,5 +102,8 @@ The difference is within noise. Instruments was not run. These are Debug numbers
 - The secret filter is best effort, as before. Exclusions and Hide private details are the reliable
   controls.
 - Escape while a suggestion shows counts as ignored, not dismissed, so it never backs a rule off.
+- Work modes are coarse on purpose: three signals, a fixed list of apps per mode, and no window titles or
+  content. An app not on the lists counts as General. Study is only chosen.
+- Rendered hover shortcuts were reviewed for Developer mode only; the other modes were checked through status.
 - The glance's buttons are reachable with the pointer and VoiceOver. The non-activating panel doesn't take
   keyboard focus for a glance, as with every other glance; ⌃⌥Space opens the workspace.

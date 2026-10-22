@@ -14,7 +14,8 @@ Phase 0 audit ─► Context events + gate ─► Intent engine ─► Suggestio
                          │                                         
                          ▼                                         
                   Privacy catalog ─► Settings › What NotchFlow observes
-Surface tiers (arbiter) ─► AttentionCenter.holdBelow ─► suggestion coordination ─► (later) capture and sound glances
+Surface tiers (arbiter) ─► AttentionCenter.holdBelow ─► one resume path for suggestions, screenshots, sound, alerts
+Context observers ─► Work modes (ModeRules + ModeTracker) ─► shortcuts, suggestion tilt, ranking
 ```
 
 ## Phase 0: repository audit · Done
@@ -33,7 +34,7 @@ reusable pieces, risks, and the measured baseline.
 | Cooldowns, dedupe, dismissal backoff, hourly cap, quiet hours, sensitivity, per-kind switches, global switch | same | Done |
 | Minimal, resettable local learning | `IntentLearning` | Done: counts per rule only; Reset and Unmute in Settings |
 | Action declarations and one capability check | `NotchCore/ActionCatalog.swift` | Done for all 31 Notch Actions and 10 suggested actions; both runners pass `ActionGuard` |
-| Written-down surface priority | `NotchCore/SurfacePriority.swift` | Done for suggestions and activity alerts; capture and sound glances keep their own waiting rules (see below) |
+| Written-down surface priority | `NotchCore/SurfacePriority.swift` | Done for every transient glance (suggestions, screenshots, sound, alerts), with one resume path |
 | Context Inspector | Settings › Diagnostics; Debug `status` | Done; redacted |
 | Privacy and permission framework | `NotchCore/PrivacyCatalog.swift`, Settings › What NotchFlow observes | Done: 15 capabilities; Reminders asked in context |
 
@@ -60,8 +61,19 @@ Phase 1 acceptance criteria from the brief:
 | Secret filter fixes | Compact JSON is no longer mistaken for a key; quoted JSON keys (`"api_key": "…"`) are now caught. |
 | Universal task progress | Already shipped (activity engine). |
 | Fluid transitions | The suggestion glance is the same silhouette, sized by a size contract and animated through `AppModel.commit`; "Why?" deepens the shape. |
+| UI under simultaneous events | Done: one coordinator decides what waits and what goes next. A screenshot waits behind a suggestion; a failure takes the surface from a screenshot, which returns; a stale sound change is dropped; a stuck-alert bug on collapse is fixed. |
 | Semantic clipboard search | **Deferred.** Needs an embedding model and an index; history is memory-only and capped at 40 items, so plain search covers it today. |
 | Encrypted clipboard persistence | **Not done, on purpose.** History stays memory-only, which is stronger than encryption at rest. |
+
+## Phase 3: the Adaptive Notch · Started
+
+| Item | Status |
+|---|---|
+| Intent Switch (work modes) | **Done.** Six modes, inferred from the app in front, a call in progress and media playing, with hysteresis, an explicit pin, per-signal switches, reasons in the glance and the inspector. Changes shortcuts, suggestion scores and ranking. ADR-8. |
+| Meeting context | Partly: Meeting mode switches at once when a call is in progress, offers Calendar, Notes and Sound, ranks the call first and quiets suggestions. Microphone and camera state stay out of reach (no public API). |
+| Media context | Partly: Media mode from the player in front or music playing; the shortcuts lead to Music and Sound. |
+| Developer context | Partly: Developer mode from editors and terminals; agents, builds and CI rank first. Git status and build output need the inbox contract to carry them. |
+| Workspace snapshots and restore | Not started (P2 below). |
 
 ## Phase 3–5: roadmap
 
@@ -70,9 +82,8 @@ Ordered by priority. Each item lists what it builds on and the platform reality.
 | Priority | Item | Builds on | Notes and limits |
 |---|---|---|---|
 | P1 | More suggestion rules from existing sources: an archive download → Extract; a finished download → Keep on Shelf | Intent engine; Download Center events become context events | Must replace, not duplicate, the download glance's own button. |
-| P1 | Move the Screenshot Magnet and Sound Island onto `SurfaceArbiter` | Surface tiers | Changes visible behavior (a screenshot would wait for the sound glance); needs on-screen verification of both. |
 | P1 | Flow Guardian summary: "Focus session completed · 48 min · 3 updates deferred" | Focus timer, `AttentionCenter.pending` | No public API reads macOS Focus without an entitlement; this would cover NotchFlow's own deferrals only. |
-| P1 | Inferred modes (Developer, Meeting, Media) with an explicit pin | Context engine; `ProductMode` presets | Inference only from wired sources; an explicit choice always wins. |
+| P1 | A Study session that starts the focus timer and quiets everything but its own kinds | Work modes, focus timer | Study is chosen, never inferred. |
 | P2 | Workspace snapshots and restore | New observer; Accessibility for window frames; per-browser Automation for URLs | Must report what couldn't be restored. Accessibility is a large permission; ask only when the feature is turned on. |
 | P2 | Teach My Mac workflows | `ActionCatalog` descriptors as steps, context events as triggers, `ActionGuard` for each step | No shell or AI-generated commands; previews and history per run. |
 | P2 | Extension providers (context and action) | The inbox spool contract, extended with typed context events | Host-rendered UI only; per-extension capabilities checked by `ActionGuard`. |
@@ -87,3 +98,7 @@ Ordered by priority. Each item lists what it builds on and the platform reality.
 2. `Suggest a next step for what you copy`: app integration, Settings, privacy catalog UI, inspector, QA
    commands, and the secret-filter fixes.
 3. Documentation, verification record, README and CONTRIBUTING updates, and the `ActionGuard` check on Notch Actions.
+4. `Give everything that waits for the notch one coordinator`: screenshots and sound on the arbiter, one
+   resume path, and the stuck-alert fix.
+5. `Intent Switch`: work modes, their effects, Settings, ⌘K, privacy entry, QA hooks.
+6. Documentation for 4 and 5.

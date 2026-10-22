@@ -5,7 +5,7 @@ uses them (`NotchCore/ContextEvents.swift`, `Features/ContextEngine.swift`). Two
 
 | Observer | Runs while | Feeds |
 |---|---|---|
-| App in front | Follow the app in front is on | Ranking (below) |
+| App in front | Follow the app in front, or Follow what I'm doing (work mode), is on | Ranking (below) and the work mode ([ADR-8](../sixth-sense/01-architecture.md#adr-8--work-modes-change-whats-offered-never-whether-the-notch-opens)) |
 | Clipboard | Suggest from what you copy is on | Suggestions ([Sixth Sense architecture](../sixth-sense/01-architecture.md)) |
 
 `ContextGate` coalesces each source: quick ⌘-Tab cycling settles on the app you stop at, and copying the same

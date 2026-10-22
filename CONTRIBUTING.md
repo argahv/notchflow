@@ -63,7 +63,7 @@ clears that build's settings.
 ## Tests
 
 ```bash
-swift test                          # 159 tests for NotchCore (macOS)
+swift test                          # 170 tests for NotchCore (macOS)
 python3 -I Tests/test_bridge.py     # 24 tests for the event CLI and agent hooks (any OS)
 ```
 
@@ -214,7 +214,8 @@ The full command list lives in [`Window/DebugChannel.swift`](Sources/NotchFlow/W
 (documenting it is [a help-wanted task](https://github.com/argahv/notchflow/issues/10)).
 
 Suggestions have a scripted acceptance run: start a sandboxed Debug build as above, then
-`python3 -I Scripts/qa_suggestions.py "$PWD/build/sandbox-data"`. It feeds copies through the clipboard
+`python3 -I Scripts/qa_suggestions.py "$PWD/build/sandbox-data"` (scenarios: basic, shelf, coordination, regression,
+surface, modes). It feeds copies through the clipboard
 filters (never your real clipboard), posts activity to the sandbox inbox only, prints a pass or fail per
 check, and leaves snapshots in `build/sandbox-data/debug`. New suggestion rules need a unit test in
 `IntentEngineTests` and, when they change what's on screen, a check there.

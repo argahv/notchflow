@@ -45,7 +45,7 @@ for Settings. `ContextEngine` starts an observer only while a feature that consu
 
 | Observer | Runs while | Mechanism |
 |---|---|---|
-| Frontmost app | "Follow the app in front" is on (a copy carries the app it was made in, so suggestions don't need this observer) | `NSWorkspace.didActivateApplicationNotification`; no polling |
+| Frontmost app | "Follow the app in front" or "Follow what I'm doing" (work mode) is on. A copy carries the app it was made in, so suggestions don't need this observer | `NSWorkspace.didActivateApplicationNotification`; no polling |
 | Clipboard | clipboard history **or** copy suggestions are on | the existing `changeCount` comparison (macOS has no change notification); one shared poll |
 
 ## ADR-4 · Intent is rules-first, explainable, and works with no model configured
@@ -109,9 +109,38 @@ news (5), idle (6). The rules:
 it, and needs-input or failures still take the surface. A suggestion displaced that way counts as
 superseded, not dismissed, so it doesn't teach the engine anything.
 
-The Screenshot Magnet and Sound Island keep their existing waiting rules in this branch. Moving them onto
-the arbiter changes visible behavior (a screenshot would wait for the sound glance) and needs its own
-on-screen verification.
+Every transient glance follows these rules: suggestions, the Screenshot Magnet, Sound Island and alerts.
+Anything that has to wait is resumed from one place, `AppModel.resumeSurface`. When a glance ends,
+`SurfaceArbiter.next` picks the most important waiting glance, then the most recent, and drops anything
+stale: a sound change after six seconds, a screenshot after ninety, a suggestion after forty-five.
+
+This changed two visible behaviors on purpose. A screenshot or sound change now waits behind a suggestion
+or under the pointer instead of replacing it; sound used to be dropped when the notch was busy. And
+needs-input or failures now take the surface from a screenshot or sound glance; a displaced screenshot
+comes back afterwards. It also fixed a stuck-alert bug: collapsing the notch while an alert showed made
+the next queued alert "current" without showing it (`dismissCurrent`'s result was discarded).
+`AttentionCenter.closeCurrent` closes without promoting anything, and a test pins the old pitfall.
+
+## ADR-8 · Work modes change what's offered, never whether the notch opens
+
+`WorkMode` (`NotchCore/WorkModes.swift`) is the brief's Intent Switch: General, Developer, Meeting, Media,
+Creative, Study. `ModeRules.read` turns signals NotchFlow already has into a mode and a plain reason (a
+call in progress first, then the app in front, then media playing). `ModeTracker` makes a different
+reading hold for fifteen seconds before the mode changes; a call switches at once. Study is never inferred.
+
+| Effect | How |
+|---|---|
+| Shortcuts on hover | Three per mode; General keeps Music, Shelf and Tools. A line says which mode and why, with a pin. |
+| Suggestions | A named score component per mode, for example "Creative mode +0.08" for colors, "In a call −0.15" for most kinds. |
+| Ranking | `WorkMode.boosted` joins the app-in-front boost, while ranking follows the app in front or when the mode is pinned. |
+
+**Why not reuse `ProductMode`:** that's a preset that writes settings once (Minimal, Dynamic, Developer).
+A work mode is live state that never changes a setting. The names stay apart in the UI: "Use Developer
+mode" applies a preset, and "Pin Developer work mode" pins a work mode.
+
+**Explicit beats inferred:** a pinned mode wins until unpinned, and switching inference off returns to
+General. Each signal can be switched off. The app-in-front observer runs while either ranking or mode
+inference needs it.
 
 ## ADR-7 · Privacy is described by data
 

@@ -183,6 +183,13 @@ Suggest from what you copy**, and a copy with an obvious next step grows out of 
   Mac, the permission, and how to turn it off and clear it. **Diagnostics › Context Inspector** shows what
   each suggestion was based on, without any content.
 
+**Work modes.** The notch also notices what you're doing: an editor or terminal in front (Developer), a
+call in progress (Meeting), a design app (Creative), music playing (Media). The shortcuts on hover follow
+(Activity, Clipboard and Shelf while you code; Calendar, Notes and Sound in a call), the right work ranks
+first, and suggestions lean that way and stay quiet during calls. A change has to hold for a few seconds,
+a line says which mode and why, and one click pins it. Choose Study yourself. **Settings › Work mode**
+switches it off or turns off any of its signals; it never opens the notch and reads nothing new.
+
 How it's built: [Sixth Sense architecture](docs/sixth-sense/01-architecture.md) ·
 [plan and roadmap](docs/sixth-sense/02-plan.md) · [verification](docs/sixth-sense/03-verification.md).
 
@@ -321,7 +328,7 @@ Events go to an owner-only local inbox; there's no listening port. See the [even
 
 ## Status
 
-**Developer preview (0.2).** NotchFlow is built and tested on a MacBook Air with a notch: 159 Swift and 24
+**Developer preview (0.2).** NotchFlow is built and tested on a MacBook Air with a notch: 170 Swift and 24
 Python tests run in CI on every push, alongside Debug and universal Release builds, plus end-to-end hook
 checks and frame-by-frame recordings of its transitions. The newest features (the portal, screenshots,
 actions, the agent heartbeat, the split island, Time Travel and the sound island) were run on a Debug build
