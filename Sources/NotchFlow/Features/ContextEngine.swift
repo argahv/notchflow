@@ -44,6 +44,16 @@ import AppKit
     func stop() { service.onCopy = nil }
 }
 
+/// Finished downloads, as the activity engine reports them (the Download Center, or any provider reporting a
+/// download). The app hands each completion here; nothing else is watched, and the file isn't read.
+@MainActor final class DownloadObserver: ContextObserver {
+    let source = ContextSource.downloads
+    private var emit: (@MainActor @Sendable (ContextSignal) -> Void)?
+    func start(_ emit: @escaping @MainActor @Sendable (ContextSignal) -> Void) { self.emit = emit }
+    func stop() { emit = nil }
+    func finished(_ download: DownloadSignal) { emit?(.download(download)) }
+}
+
 /// Runs the observers, coalesces what they report through `ContextGate`, and keeps the Context
 /// Inspector's log. The log holds redacted summaries only: an app's name, or "copied 42 characters".
 @MainActor final class ContextEngine: ObservableObject {

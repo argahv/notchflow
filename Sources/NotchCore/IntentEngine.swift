@@ -6,7 +6,7 @@ import Foundation
 
 /// Kinds of suggestion a person can turn off one at a time.
 public enum SuggestionCategory: String, Codable, Sendable, CaseIterable, Identifiable {
-    case links, colors, data, places, dates, contacts, files, text
+    case links, colors, data, places, dates, contacts, files, text, downloads
     public var id: String { rawValue }
     public var title: String {
         switch self {
@@ -18,6 +18,7 @@ public enum SuggestionCategory: String, Codable, Sendable, CaseIterable, Identif
         case .contacts: "Email and phone"
         case .files: "File paths"
         case .text: "Long text"
+        case .downloads: "Downloads"
         }
     }
     public var summary: String {
@@ -30,6 +31,7 @@ public enum SuggestionCategory: String, Codable, Sendable, CaseIterable, Identif
         case .contacts: "Write to an email address or call a number"
         case .files: "Show a copied path in Finder"
         case .text: "Keep a long passage on the shelf or as a note"
+        case .downloads: "Extract a downloaded archive, or open Actions for a PDF, image or video"
         }
     }
 }
@@ -59,6 +61,10 @@ public enum SuggestedAction: Hashable, Sendable {
     case openFile(path: String)
     case keepOnShelf(String)
     case newNote(String)
+    /// Expands a downloaded archive next to itself with Archive Utility. The archive is kept.
+    case extractArchive(path: String)
+    /// Keeps a file on the shelf by reference and opens Notch Actions for it, starting `then` if given.
+    case openActions(path: String, then: ContentAction?)
 
     public var title: String {
         switch self {
@@ -72,6 +78,8 @@ public enum SuggestedAction: Hashable, Sendable {
         case .openFile: "Open"
         case .keepOnShelf: "Keep on Shelf"
         case .newNote: "New Note"
+        case .extractArchive: "Extract"
+        case .openActions(_, let then): then?.title ?? "Actions…"
         }
     }
     public var symbol: String {
@@ -86,6 +94,8 @@ public enum SuggestedAction: Hashable, Sendable {
         case .openFile: "arrow.up.forward.app"
         case .keepOnShelf: "tray.and.arrow.down"
         case .newNote: "square.and.pencil"
+        case .extractArchive: "archivebox"
+        case .openActions: "wand.and.stars"
         }
     }
 }
@@ -124,6 +134,7 @@ public enum HoldReason: Equatable, Sendable {
     case detailsHidden
     case quiet
     case quietHours
+    case focusSession
     case nothingToOffer
     case categoryOff(SuggestionCategory)
     case muted
@@ -138,6 +149,7 @@ public enum HoldReason: Equatable, Sendable {
         case .detailsHidden: "Private details are hidden"
         case .quiet: "Quiet mode is on"
         case .quietHours: "Quiet hours"
+        case .focusSession: "A focus session is running"
         case .nothingToOffer: "Nothing useful to suggest"
         case .categoryOff(let category): "\(category.title) suggestions are off"
         case .muted: "Muted after repeated dismissals"
@@ -188,12 +200,14 @@ public struct IntentSituation: Sendable {
     public var quietHours: QuietHours?
     /// The work mode (see `WorkMode`): it tilts some kinds of suggestion up, and quiets them during calls.
     public var mode: WorkMode
+    /// A focus session is running: suggestions wait for its end (see `FocusLedger`).
+    public var focusing: Bool
     public var calendar: Calendar
     public init(enabled: Bool = true, sensitivity: SuggestionSensitivity = .balanced, disabledCategories: Set<SuggestionCategory> = [],
                 quiet: Bool = false, privateMode: Bool = false, quietHours: QuietHours? = nil, mode: WorkMode = .general,
-                calendar: Calendar = .current) {
+                focusing: Bool = false, calendar: Calendar = .current) {
         self.enabled = enabled; self.sensitivity = sensitivity; self.disabledCategories = disabledCategories
-        self.quiet = quiet; self.privateMode = privateMode; self.quietHours = quietHours; self.mode = mode; self.calendar = calendar
+        self.quiet = quiet; self.privateMode = privateMode; self.quietHours = quietHours; self.mode = mode; self.focusing = focusing; self.calendar = calendar
     }
 }
 
@@ -289,10 +303,13 @@ public struct IntentEngine: Sendable {
         if let hours = situation.quietHours, hours.contains(now, calendar: situation.calendar) {
             return .hold(.quietHours, rule: nil, components: [])
         }
-        guard case .clipboard(let clip) = event.signal,
-              let candidate = IntentRules.candidate(for: clip, now: now, calendar: situation.calendar) else {
-            return .hold(.nothingToOffer, rule: nil, components: [])
+        if situation.focusing, event.privacy == .content { return .hold(.focusSession, rule: nil, components: []) }
+        let found: IntentRules.Candidate? = switch event.signal {
+        case .clipboard(let clip): IntentRules.candidate(for: clip, now: now, calendar: situation.calendar)
+        case .download(let download): IntentRules.candidate(for: download)
+        case .frontmostApp: nil
         }
+        guard let candidate = found else { return .hold(.nothingToOffer, rule: nil, components: []) }
         let rule = candidate.rule
         var components = [ScoreComponent("Matches \(candidate.matchLabel)", candidate.base * candidate.confidence)] + candidate.adjustments
         let tilt = situation.mode.suggestionAdjustment(for: candidate.category)
@@ -450,6 +467,39 @@ enum IntentRules {
                         actions: [.keepOnShelf(text), .newNote(text)], reason: "You copied \(words) words\(from).")
         case .code, .plain:
             // Code and short text are copied constantly; suggesting something every time would be noise.
+            return nil
+        }
+    }
+
+    /// A finished download: an archive to expand, or a PDF, image or video for Notch Actions. Other files keep
+    /// the download's own glance with Show in Finder, so nothing is offered twice.
+    static func candidate(for download: DownloadSignal) -> Candidate? {
+        let size = download.byteCount.map { " · " + ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? ""
+        let reveal = SuggestedAction.reveal(path: download.path)
+        func make(_ rule: String, base: Double, title: String, symbol: String, actions: [SuggestedAction], reason: String) -> Candidate {
+            Candidate(rule: rule, category: .downloads, base: base, confidence: 1, matchLabel: "a finished download", title: title,
+                      detail: oneLine(download.name, limit: 40) + size, symbol: symbol, actions: actions, reason: reason,
+                      dedupeKey: download.path.hashValue)
+        }
+        if download.isArchive {
+            return make("download.archive", base: 0.75, title: "Archive downloaded", symbol: "archivebox",
+                        actions: [.extractArchive(path: download.path), reveal],
+                        reason: "A download just finished. Extract expands it next to the archive with Archive Utility and keeps the archive.")
+        }
+        switch download.kind {
+        case .pdf:
+            return make("download.pdf", base: 0.72, title: "PDF downloaded", symbol: "doc.richtext",
+                        actions: [.openActions(path: download.path, then: .pdfText), reveal, .openActions(path: download.path, then: nil)],
+                        reason: "A PDF just finished downloading. Its actions keep it on the shelf by reference and read it on this Mac.")
+        case .image:
+            return make("download.image", base: 0.68, title: "Image downloaded", symbol: "photo",
+                        actions: [.openActions(path: download.path, then: nil), reveal],
+                        reason: "An image just finished downloading. Actions can convert, resize, compress or read its text, on new copies.")
+        case .video, .audio:
+            return make("download.media", base: 0.62, title: download.kind == .video ? "Video downloaded" : "Audio downloaded",
+                        symbol: download.kind == .video ? "film" : "waveform", actions: [.openActions(path: download.path, then: nil), reveal],
+                        reason: "A download just finished. Actions can show its details, save a frame or compress a copy.")
+        default:
             return nil
         }
     }

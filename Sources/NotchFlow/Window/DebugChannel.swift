@@ -80,6 +80,14 @@ import AppKit
             case "sensitivity": if parts.count > 1, let value = SuggestionSensitivity(rawValue: parts[1]) { model.preferences.suggestionSensitivity = value }
             default: break
             }
+        case "pointer":
+            // "pointer:scripted" ignores the real pointer (position, movement, drags, clicks); "pointer:real" undoes it.
+            windows.scriptedPointer = argument == "scripted"
+        case "focus":
+            // "focus:<seconds>" starts a focus session that long; "focus:stop" ends it early; "focus:guard:on|off".
+            if argument == "stop" { model.cancelTimer() }
+            else if argument.hasPrefix("guard:") { model.preferences.flowGuardian = argument.hasSuffix(":on") }
+            else if let seconds = Double(argument) { model.startFocus(seconds: seconds) }
         case "privacy": model.preferences.privacy = argument == "on"
         case "front":
             // "front:<bundle id>|<name>": the app in front, through the same gate as the real observer; real
@@ -245,6 +253,7 @@ import AppKit
                    "learning: " + model.learnedRules.sorted { $0.key < $1.key }.map { "\($0.key) +\($0.value.accepted) -\($0.value.dismissed) ~\($0.value.ignored)" }.joined(separator: ", "),
                    "clipboard: history \(model.clipboard.enabled) · items \(model.clipboard.items.count) · skipped \(model.clipboard.skipped)",
                    "waiting: " + model.waitingGlances.map { "\($0.kind.rawValue)/\($0.tier.title)" }.joined(separator: ","),
+                   "focus: \(model.focus.active ? (model.focusing ? "holding" : "paused") : "off") · waiting \(model.focus.entries.count) · last \(model.focusSummary.map { "\($0.record) \($0.detail) waited=\($0.waited)" } ?? "-")",
                    "work mode: \(model.workMode.rawValue) · \(model.workModeReason) · pending \(model.pendingModeReading?.mode.rawValue ?? "-") · shortcuts \(model.workMode.shortcuts.map(\.rawValue).joined(separator: ",")) · line \(model.showsModeLine)"]
             try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)
         case "dumpHooks":

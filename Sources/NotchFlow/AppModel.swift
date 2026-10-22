@@ -115,6 +115,7 @@ struct CommandItem: Identifiable {
     let github = GitHubActionsProvider()
     let clipboard = ClipboardService()
     let contextEngine = ContextEngine()
+    let downloadObserver = DownloadObserver()
     let downloads = DownloadsProvider()
     private(set) lazy var meetings = MeetingProvider(calendar: calendar)
     @Published private(set) var audioOutputs: [AudioOutput] = []
@@ -164,11 +165,13 @@ struct CommandItem: Identifiable {
         // front reorders the stack; copies can suggest a next step.
         contextEngine.register(FrontmostAppObserver())
         contextEngine.register(ClipboardObserver(service: clipboard))
+        contextEngine.register(downloadObserver)
         contextEngine.onEvent = { [weak self] event in self?.contextEvent(event) }
         synchronizeContext()
-        Publishers.Merge3(preferences.$contextAware.dropFirst().map { _ in () },
+        Publishers.Merge4(preferences.$contextAware.dropFirst().map { _ in () },
                           preferences.$suggestionsEnabled.dropFirst().map { _ in () },
-                          preferences.$clipboardSuggestions.dropFirst().map { _ in () })
+                          preferences.$clipboardSuggestions.dropFirst().map { _ in () },
+                          preferences.$downloadSuggestions.dropFirst().map { _ in () })
             .sink { [weak self] in DispatchQueue.main.async { self?.synchronizeContext() } }
             .store(in: &subscriptions)
         preferences.$clipboardExcludedApps.dropFirst()
@@ -187,6 +190,8 @@ struct CommandItem: Identifiable {
         battery.$percent.combineLatest(battery.$charging).scan((Int?.none, Int?.none, false)) { state, next in (state.1, next.0, next.1) }
             .sink { [weak self] previous, current, charging in self?.batteryChanged(from: previous, to: current, charging: charging) }
             .store(in: &subscriptions)
+        // A focus timer kept across a relaunch starts a fresh ledger; what waited before the relaunch isn't known.
+        if countdown.exists { focus.begin(at: Date()); if !countdown.running { focus.pause(at: Date()) } }
         clock.onTick = { [weak self] date in self?.tick(date) }
         clock.run(countdown.running)
         screenshots.onCapture = { [weak self] capture in self?.captureArrived(capture) }
@@ -674,7 +679,8 @@ struct CommandItem: Identifiable {
         AttentionContext(editing: interaction.editing || interaction.portal != .closed,
                          expanded: interaction.presentation == .expanded,
                          suppressed: preferences.quietMode || preferences.privacy,
-                         holdBelow: SurfaceArbiter.lowestPriorityAdmitted(over: transientTier))
+                         holdBelow: max(SurfaceArbiter.lowestPriorityAdmitted(over: transientTier),
+                                        focusing ? FlowGuardian.lowestPriorityDuringFocus : .silent))
     }
 
     func send(_ event: InteractionEvent) {
@@ -812,7 +818,7 @@ struct CommandItem: Identifiable {
             if record(event.key)?.event == event { trackAgent(event, prior: prior) }
             let updated = record(event.key)?.event
             let order = interaction.presentation == .expanded ? stackPlacement(for: event.key, prior: prior) : nil
-            if updated == event && event.isMaterialChange(from: prior) { deliver(event) }
+            if updated == event && event.isMaterialChange(from: prior), !suggestForDownload(event) { deliver(event) }
             if let record = record(event.key), [.completed, .cancelled].contains(record.event.lifecycle),
                workspaceActivityIDs.contains(record.id), !record.isPinned { scheduleRetraction(record.id) }
             scheduleExpiryRefresh()
@@ -855,6 +861,10 @@ struct CommandItem: Identifiable {
         case .present(let item): present(item)
         case .queue: resumeSurface(after: max(0.6, (attention.nextEligible() ?? Date()).timeIntervalSinceNow + 0.05))
         case .indicate:
+            if focusing, item.priority < FlowGuardian.lowestPriorityDuringFocus {
+                // Held for the end of the focus session: no rim, no badge. The stack still has it.
+                focus.note(id: item.id, kind: .update, title: event.title); return
+            }
             illuminate(event.lifecycle.tone)
             if item.priority.interrupts, !(interaction.presentation == .expanded && route.feature == .activity) {
                 dockBadge = item.priority.tone
@@ -1091,6 +1101,9 @@ struct CommandItem: Identifiable {
 
     struct NotificationAction { let title: String; let perform: () -> Void }
     func notificationAction(_ record: ActivityRecord) -> NotificationAction {
+        if let summary = focusSummary, summary.record == record.id, summary.waited > 0 {
+            return NotificationAction(title: "Review") { [weak self] in self?.reviewFocusSession() }
+        }
         if record.actionableRequest() != nil { return NotificationAction(title: "Review") { [weak self] in self?.viewNotificationDetails() } }
         if record.event.actionURL != nil, [.meeting, .download, .ci, .build, .deploy].contains(record.event.kind) {
             return NotificationAction(title: actionTitle(record)) { [weak self] in
@@ -1452,6 +1465,7 @@ struct CommandItem: Identifiable {
             parts.append("worked " + Duration.seconds(elapsed).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .abbreviated, maximumUnitCount: 2)))
         }
         if let size = completion.size { parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)) }
+        if event.source == "timer", let summary = event.summary { parts.append(summary) }
         return parts.joined(separator: " · ")
     }
 
@@ -1854,19 +1868,25 @@ struct CommandItem: Identifiable {
 
     // MARK: Focus timer
 
-    func startTimer(minutes: Int) {
-        countdown.start(seconds: Double(minutes * 60)); persistTimer(); clock.run(true); reflow()
+    func startTimer(minutes: Int) { startFocus(seconds: Double(minutes * 60)) }
+    func startFocus(seconds: TimeInterval) {
+        countdown.start(seconds: seconds); focus.begin(at: Date()); persistTimer(); clock.run(true); reflow()
     }
     func toggleTimer() {
-        if countdown.running { countdown.pause() } else { countdown.resume() }
+        if countdown.running { countdown.pause(); focus.pause(at: Date()) } else { countdown.resume(); focus.resume(at: Date()) }
         persistTimer(); clock.run(countdown.running); reflow()
     }
-    func cancelTimer() { countdown.cancel(); persistTimer(); clock.run(false); reflow() }
+    /// Stopping early says what waited, if anything did; otherwise it ends quietly as before.
+    func cancelTimer() {
+        countdown.cancel(); persistTimer(); clock.run(false)
+        if let summary = focus.end(at: Date(), completed: false), summary.waited > 0 { finishFocus(summary, at: Date()) }
+        reflow()
+    }
     private func tick(_ date: Date) {
         guard countdown.consumeCompletion(now: date) else { return }
         persistTimer(); clock.run(false)
-        ingest(ActivityEvent(source: "timer", activityId: UUID().uuidString, phase: .completed,
-                             title: "Focus session finished", timestamp: date))
+        let summary = focus.end(at: date, completed: true) ?? FocusSummary(focused: 0, completed: true, updates: [], suggestions: 0)
+        finishFocus(summary, at: date)
         if !preferences.quietMode { NSSound(named: "Glass")?.play() }
     }
     private func persistTimer() { UserDefaults.standard.set(try? JSONEncoder().encode(countdown), forKey: "countdown") }
@@ -1970,6 +1990,7 @@ struct CommandItem: Identifiable {
         let modesWatchApps = preferences.workModesEnabled && preferences.pinnedWorkMode == nil && !preferences.modeDetectorsOff.contains(.apps)
         contextEngine.setEnabled(.frontmostApp, preferences.contextAware || modesWatchApps)
         contextEngine.setEnabled(.clipboard, suggesting)
+        contextEngine.setEnabled(.downloads, preferences.suggestionsEnabled && preferences.downloadSuggestions)
         configureClipboard()
         if !contextEngine.isRunning(.frontmostApp) { frontmostApp = nil; frontmostName = nil }
         updateWorkMode()
@@ -1987,6 +2008,12 @@ struct CommandItem: Identifiable {
             let decision = intent.evaluate(event, in: intentSituation)
             contextEngine.record(decision)
             if case .suggest(let suggestion) = decision { offer(suggestion) }
+            if case .hold(.focusSession, _, _) = decision { focus.note(id: event.id.uuidString, kind: .suggestion, title: event.redactedSummary) }
+        case .download:
+            // A download held by a focus session is counted as the update it also is, not twice.
+            let decision = intent.evaluate(event, in: intentSituation)
+            contextEngine.record(decision)
+            if case .suggest(let suggestion) = decision { offer(suggestion); downloadSuggested = true }
         }
     }
 
@@ -1994,7 +2021,7 @@ struct CommandItem: Identifiable {
         IntentSituation(enabled: preferences.suggestionsEnabled, sensitivity: preferences.suggestionSensitivity,
                         disabledCategories: preferences.suggestionCategoriesOff, quiet: preferences.quietMode, privateMode: preferences.privacy,
                         quietHours: preferences.quietHoursEnabled ? QuietHours(start: preferences.quietHoursStart, end: preferences.quietHoursEnd) : nil,
-                        mode: workMode)
+                        mode: workMode, focusing: focusing)
     }
 
     /// Who has the surface, in `SurfaceArbiter`'s terms.
@@ -2076,6 +2103,21 @@ struct CommandItem: Identifiable {
         retireSuggestion(.superseded)
     }
 
+    /// Set while a finished download is evaluated, when it produced a suggestion.
+    private var downloadSuggested = false
+
+    /// A finished download that a suggestion fits shows that suggestion instead of its plain notice, so it's
+    /// offered once. Otherwise (no rule fits, cooling down, suggestions off) the notice shows as before.
+    private func suggestForDownload(_ event: ActivityEvent) -> Bool {
+        guard event.kind == .download, event.lifecycle == .completed, contextEngine.isRunning(.downloads),
+              let string = event.actionURL, let url = URL(string: string), url.isFileURL,
+              FileManager.default.fileExists(atPath: url.path) else { return false }
+        downloadSuggested = false
+        defer { downloadSuggested = false }
+        downloadObserver.finished(DownloadInspector.signal(for: url))
+        return downloadSuggested
+    }
+
     private func resolve(_ suggestion: Suggestion, _ outcome: SuggestionOutcome) {
         intent.resolve(suggestion, outcome, at: Date())
         contextEngine.record(outcome, for: suggestion)
@@ -2125,6 +2167,10 @@ struct CommandItem: Identifiable {
             commit(snapshot, also: { self.suggestionWhy = false
                 self.suggestionResult = SuggestionResult(title: title, detail: detail, failed: false, canUndo: undo != nil) })
             scheduleSuggestionClose(after: undo == nil ? 2.5 : 5)
+        case .openActions(let ids, let then):
+            // On the shelf now; its actions open in the workspace, as they do for a drop.
+            closeSuggestion(nil)
+            openActions(ids, then: then)
         case .failed(let message):
             commit(snapshot, also: { self.suggestionWhy = false
                 self.suggestionResult = SuggestionResult(title: "Couldn't do that", detail: message, failed: true, canUndo: false) })
@@ -2160,6 +2206,34 @@ struct CommandItem: Identifiable {
     }
     private func persistLearning() {
         UserDefaults.standard.set(try? JSONEncoder().encode(intent.learning), forKey: "intentLearning")
+    }
+
+    // MARK: Flow Guardian
+
+    /// What waited during the current focus session (see `FocusLedger`).
+    private(set) var focus = FocusLedger()
+    /// The last session's summary and the History record that carries it.
+    private(set) var focusSummary: (record: String, waited: Int, updates: [String], detail: String)?
+    /// Holding back what doesn't need the person: a focus timer is running and Flow Guardian is on.
+    var focusing: Bool { preferences.flowGuardian && focus.focusing }
+
+    /// The session's end, as the existing "Focus session finished" moment, now saying what waited. What waited
+    /// isn't replayed one glance at a time: it's in the stack and History, and Review goes there.
+    private func finishFocus(_ summary: FocusSummary, at date: Date) {
+        for id in summary.updates { attention.discard(id: id) }
+        let id = UUID().uuidString
+        focusSummary = ("timer:" + id, summary.waited, summary.updates, summary.detail)
+        contextEngine.noteMode("Focus · \(summary.title) · \(summary.detail)")
+        ingest(ActivityEvent(source: "timer", activityId: id, phase: .completed, title: summary.title, summary: summary.detail, timestamp: date))
+    }
+
+    /// Opens what waited: the stack if any of it is still going, otherwise History.
+    func reviewFocusSession() {
+        let live = Set(visibleActivities.map(\.id))
+        let target: Route = focusSummary?.updates.contains(where: live.contains) == true ? .activity(detail: nil) : .history(detail: nil)
+        dismissNotification()
+        navigate(target)
+        windows?.focus()
     }
 
     // MARK: Commands (⌘K)

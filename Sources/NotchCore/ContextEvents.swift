@@ -6,12 +6,13 @@ import Foundation
 /// Where a signal came from: one case per observer that exists, so nothing here describes a source that
 /// isn't wired.
 public enum ContextSource: String, Codable, Sendable, CaseIterable, Identifiable {
-    case frontmostApp, clipboard
+    case frontmostApp, clipboard, downloads
     public var id: String { rawValue }
     public var title: String {
         switch self {
         case .frontmostApp: "App in front"
         case .clipboard: "Clipboard"
+        case .downloads: "Finished downloads"
         }
     }
 }
@@ -43,20 +44,37 @@ public struct ClipboardSignal: Hashable, Sendable {
     }
 }
 
+/// A download that just finished, as the activity engine reported it. Its kind is read from the file's type
+/// by the app; nothing in the file is read.
+public struct DownloadSignal: Hashable, Sendable {
+    public var name: String
+    public var path: String
+    public var byteCount: Int64?
+    public var kind: ContentKind
+    /// An archive Archive Utility can expand (not a disk image or an installer package).
+    public var isArchive: Bool
+    public init(name: String, path: String, byteCount: Int64? = nil, kind: ContentKind, isArchive: Bool = false) {
+        self.name = name; self.path = path; self.byteCount = byteCount; self.kind = kind; self.isArchive = isArchive
+    }
+}
+
 public enum ContextSignal: Hashable, Sendable {
     case frontmostApp(bundleID: String?, name: String?)
     case clipboard(ClipboardSignal)
+    case download(DownloadSignal)
 
     public var source: ContextSource {
         switch self {
         case .frontmostApp: .frontmostApp
         case .clipboard: .clipboard
+        case .download: .downloads
         }
     }
     public var privacy: PrivacyClass {
         switch self {
         case .frontmostApp: .activity
-        case .clipboard: .content
+        // A file name can say as much as what's in the file.
+        case .clipboard, .download: .content
         }
     }
 }
@@ -79,6 +97,18 @@ public struct ContextEvent: Equatable, Sendable, Identifiable {
         case .clipboard(let clip):
             let origin = clip.sourceName.map { " in \($0)" } ?? ""
             return "Copied \(clip.text.count) characters\(origin)"
+        case .download(let download):
+            let kind: String = switch download.kind {
+            case .pdf: "a PDF"
+            case .image: "an image"
+            case .video: "a video"
+            case .audio: "an audio file"
+            case .text, .code: "a text file"
+            case .folder: "a folder"
+            case .file, .link, .collection: "a file"
+            }
+            let what = download.isArchive ? "an archive" : kind
+            return "Downloaded \(what)" + (download.byteCount.map { " · " + ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "")
         }
     }
 }
@@ -109,6 +139,8 @@ public struct ContextGate: Sendable {
         .frontmostApp: Rule(repeatWindow: .infinity, minimumInterval: 0.25),
         // Copying the same thing twice in a row is one copy.
         .clipboard: Rule(repeatWindow: 3, minimumInterval: 0.4),
+        // Each finished file passes at once; the same file reported twice in a minute is one.
+        .downloads: Rule(repeatWindow: 60, minimumInterval: 0),
     ]
 
     private let rules: [ContextSource: Rule]

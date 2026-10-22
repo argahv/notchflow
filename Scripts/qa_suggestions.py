@@ -5,7 +5,7 @@ Debug builds only, with their own data folder so nothing reaches your real shelf
     xcodebuild -project NotchFlow.xcodeproj -scheme NotchFlow -configuration Debug -derivedDataPath build/Sandbox \
       PRODUCT_BUNDLE_IDENTIFIER=com.argahv.notchflow.dev CODE_SIGNING_ALLOWED=NO build
     NOTCHFLOW_APP_SUPPORT="$PWD/build/sandbox-data" build/Sandbox/Build/Products/Debug/NotchFlow.app/Contents/MacOS/NotchFlow &
-    python3 -I Scripts/qa_suggestions.py "$PWD/build/sandbox-data" [all|basic|shelf|coordination|regression|surface|modes]
+    python3 -I Scripts/qa_suggestions.py "$PWD/build/sandbox-data" [all|basic|shelf|coordination|regression|surface|modes|downloads|focus]
 
 Copies are fed to ClipboardService.consider (the filters a real copy passes), so the real clipboard is never
 read or written. Activity events are written to the sandbox inbox only. Snapshots land in <data>/debug/*.png.
@@ -41,13 +41,15 @@ def snap(name, light=False):
     return os.path.join(DEBUG, f"{name}.png")
 
 
-def event(activity, state, title, category="build", summary=None):
+def event(activity, state, title, category="build", summary=None, action_url=None):
     now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     phase = {"failed": "failed", "completed": "completed", "running": "progress", "needsInput": "waiting"}[state]
     body = {"version": 2, "source": "qa", "activityId": activity, "phase": phase, "state": state, "title": title,
             "category": category, "timestamp": now}
     if summary:
         body["summary"] = summary
+    if action_url:
+        body["actionURL"] = action_url
     path = os.path.join(INBOX, f"qa-{uuid.uuid4().hex}.json")
     with open(path, "w") as handle:
         json.dump(body, handle)
@@ -68,6 +70,8 @@ def line(key):
 
 scenario = sys.argv[2] if len(sys.argv) > 2 else "all"
 os.makedirs(DEBUG, exist_ok=True)
+# The real pointer is ignored for the run, so moving the mouse while it runs can't change a result.
+send("pointer:scripted", wait=0.3)
 
 if scenario in ("all", "basic"):
     send("suggest:on", "suggest:reset", "privacy:off", "quiet:off", wait=1.0)
@@ -210,6 +214,9 @@ if scenario in ("all", "surface"):
 if scenario in ("all", "modes"):
     # Intent Switch: an inferred work mode that settles, a pin that wins, a call that switches at once.
     send("clearActivities", "mode:auto", "mode:follow:on", "mode:settle:2", "suggest:on", "suggest:reset", "privacy:off", "quiet:off", wait=1.0)
+    # Start from General whatever ran before: Finder in front, held past the settle time.
+    send("front:com.apple.finder|Finder", wait=2.6)
+    send("front:com.apple.finder|Finder", wait=0.4)
     send("front:com.apple.dt.Xcode|Xcode", wait=0.6)
     s = status()
     check("a new app in front is only pending at first", s.get("work mode", "").startswith("general") and "pending developer" in s.get("work mode", ""),
@@ -254,5 +261,79 @@ if scenario in ("all", "modes"):
     check("with following off it's General", s.get("work mode", "").startswith("general · Following what you do is off"), s.get("work mode"))
     send("mode:follow:on", "mode:settle:15", "suggest:off", "notification:dismiss", "front:real", wait=0.6)
 
+if scenario in ("all", "downloads"):
+    # A finished download a suggestion fits shows that suggestion instead of its plain notice; others keep the notice.
+    import pathlib, shutil, zipfile
+    tag = uuid.uuid4().hex[:6]
+    archive, image, text = (os.path.join(ROOT, f"qa-{name}-{tag}.{ext}") for name, ext in (("assets", "zip"), ("photo", "png"), ("notes", "txt")))
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("readme.txt", "hello")
+    shutil.copyfile(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "media", "resting.png"), image)
+    with open(text, "w") as handle:
+        handle.write("plain notes")
+
+    def finished(path):
+        event("dl-" + uuid.uuid4().hex[:6], "completed", "Downloaded " + os.path.basename(path), category="download",
+              action_url=pathlib.Path(path).as_uri())
+        time.sleep(1.3)
+
+    send("suggest:on", "suggest:reset", "privacy:off", "quiet:off", "focus:stop", "close", wait=1.0)
+    finished(archive)
+    s = status()
+    check("a finished archive offers Extract and Show in Finder", "download.archive · Archive downloaded · Extract,Show in Finder" in s.get("suggestion", ""),
+          s.get("suggestion"))
+    check("in place of its plain notice", "glance: suggestion(" in s.get("capture", ""), s.get("capture"))
+    snap("qa-8-download")
+    check("the inspector never names the file", "Downloaded an archive" in s.get("inspector", "") and "assets-" not in s.get("inspector", ""),
+          s.get("inspector"))
+    send("suggest:dismiss", wait=1.0)
+    finished(image)
+    s = status()
+    check("a finished image offers its actions", "download.image · Image downloaded · Actions…,Show in Finder" in s.get("suggestion", ""),
+          f"{s.get('suggestion')} | {s.get('capture')} | {s.get('inspector')} | {s.get('work mode')}")
+    send("suggest:run:0", wait=1.5)
+    s = status()
+    check("Actions opens Notch Actions on the file, kept by reference", "actions" in s.get("route", "") and "image qa-photo-" in s.get("action context", ""),
+          f"{s.get('route')} | {s.get('action context')}")
+    send("close", "shelf:clear", wait=1.0)
+    finished(text)
+    s = status()
+    check("a file no rule fits keeps its plain notice", 'glance: notification("qa:dl-' in s.get("capture", ""), s.get("capture"))
+    send("notification:dismiss", "suggest:off", wait=0.8)
+    for path in (archive, image, text):
+        os.remove(path)
+
+if scenario in ("all", "focus"):
+    # Flow Guardian: during a focus session only work that needs you comes through; the end says what waited.
+    tag = uuid.uuid4().hex[:6]
+    send("suggest:on", "suggest:reset", "privacy:off", "quiet:off", "focus:guard:on", "close", wait=1.0)
+    started = time.time()
+    send("focus:10", wait=0.8)
+    s = status()
+    check("a focus session holds updates", s.get("focus", "").startswith("holding"), s.get("focus"))
+    event("fb-" + tag, "completed", "Build finished", category="build")
+    time.sleep(1.2)
+    s = status()
+    check("a finished build waits without a glance", "notification(" not in s.get("capture", "") and "waiting 1" in s.get("focus", ""),
+          f"{s.get('capture')} | {s.get('focus')}")
+    event("ff-" + tag, "failed", "Deploy failed", category="deploy")
+    time.sleep(1.2)
+    s = status()
+    check("a failure still comes through", f'notification("qa:ff-{tag}")' in s.get("capture", ""), s.get("capture"))
+    send("notification:dismiss", wait=0.8)
+    send("clip:#123456", wait=1.0)
+    s = status()
+    check("a copy suggestion waits too", "A focus session is running" in s.get("inspector", "") and "waiting 2" in s.get("focus", ""),
+          f"{s.get('inspector')} | {s.get('focus')}")
+    time.sleep(max(0.5, 11.5 - (time.time() - started)))
+    s = status()
+    check("the end says what waited", s.get("focus", "").startswith("off") and "1 update and 1 suggestion waited waited=2" in s.get("focus", ""),
+          s.get("focus"))
+    shown = "notification(\"timer:" in s.get("capture", "") or "waited" in s.get("celebration", "")
+    check("as the session's own end-of-session glance (unless you were typing)", shown, f"{s.get('capture')} | {s.get('celebration')}")
+    snap("qa-9-focus-end")
+    send("notification:dismiss", "suggest:off", wait=0.6)
+
+send("pointer:real", "front:real", wait=0.3)
 print()
 print(f"{sum(ok for _, ok, _ in results)}/{len(results)} checks passed")

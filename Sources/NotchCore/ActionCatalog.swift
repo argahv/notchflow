@@ -135,6 +135,13 @@ public enum ActionCatalog {
         case .newNote:
             return ActionDescriptor(id: "suggest.newNote", title: title, inputs: [.text], outputs: [.note], impact: .createsRecord,
                                     undo: .removesCreated)
+        case .extractArchive:
+            // Archive Utility expands it next to the archive; the archive itself is left as it is.
+            return ActionDescriptor(id: "suggest.extractArchive", title: title, inputs: [.file], outputs: [.folder], impact: .opensElsewhere)
+        case .openActions:
+            // A reference on the shelf; each Notch Action it leads to is checked on its own.
+            return ActionDescriptor(id: "suggest.openActions", title: title, inputs: [.file, .pdf, .image, .video, .audio],
+                                    outputs: [.shelfItem], impact: .createsRecord)
         }
     }
 
@@ -143,6 +150,7 @@ public enum ActionCatalog {
         .openURL(URL(string: "https://example.com")!), .copyText("x", label: "Copy"), .openMaps("1 Infinite Loop"),
         .composeEmail("a@example.com"), .call("+1 555 0100"), .remind(title: "x", due: Date(timeIntervalSince1970: 0)),
         .reveal(path: "/tmp"), .openFile(path: "/tmp"), .keepOnShelf("x"), .newNote("x"),
+        .extractArchive(path: "/tmp/a.zip"), .openActions(path: "/tmp/a.pdf", then: .pdfText),
     ]
 
     public static var all: [ActionDescriptor] {

@@ -116,6 +116,8 @@ enum SuggestionWording {
         case .openFile: "Opens it with its usual app. Apps and scripts are only shown in Finder."
         case .keepOnShelf: "Keeps it on the shelf, where Actions can do more with it. Undo removes it."
         case .newNote: "Saves it as a note in Tools › Notes. Undo removes it."
+        case .extractArchive: "Expands it next to the archive with Archive Utility. The archive stays where it is."
+        case .openActions(_, let then): (then.map { "\($0.title), on this Mac. " } ?? "") + "Keeps it on the shelf by reference; the original isn't changed."
         }
     }
 }

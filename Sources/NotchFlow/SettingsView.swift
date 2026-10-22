@@ -64,6 +64,11 @@ struct SettingsView: View {
                     Text("A link, color, JSON, address, date, email address, phone number, file path or long passage can come with one next step. Uses the same filters as clipboard history, and keeps nothing you copied.")
                 }
                 .disabled(!preferences.suggestionsEnabled)
+                Toggle(isOn: $preferences.downloadSuggestions) {
+                    Text("Suggest for finished downloads")
+                    Text("A finished archive comes with Extract, and a PDF, image or video with its actions, in place of the plain notice. Only the file's type is read. Works with the Download Center or anything that reports a download.")
+                }
+                .disabled(!preferences.suggestionsEnabled)
                 Picker("How often", selection: $preferences.suggestionSensitivity) {
                     ForEach(SuggestionSensitivity.allCases) { Text($0.title).tag($0) }
                 }
@@ -136,6 +141,10 @@ struct SettingsView: View {
                 Toggle(isOn: $preferences.showBattery) {
                     Text("Show battery beside the notch")
                     Text("With nothing to show, the resting notch hides entirely behind the camera housing.")
+                }
+                Toggle(isOn: $preferences.flowGuardian) {
+                    Text("Hold updates during a focus session")
+                    Text("While a focus timer runs, only requests and failures come through. Finished work, progress and suggestions wait in the stack, and the session's end says what waited. This covers NotchFlow's own previews; macOS doesn't let apps hold other apps' notifications.")
                 }
                 Picker("Keep history", selection: $preferences.historyRetentionDays) {
                     Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90); Text("Until cleared").tag(0)
@@ -427,7 +436,8 @@ private struct LearningRow: View {
     @ObservedObject var model: AppModel
     static let names = ["clipboard.link": "Links", "clipboard.color": "Colors", "clipboard.json": "JSON", "clipboard.address": "Addresses",
                         "clipboard.date": "Dates", "clipboard.email": "Email", "clipboard.phone": "Phone", "clipboard.path": "File paths",
-                        "clipboard.prose": "Long text"]
+                        "clipboard.prose": "Long text", "download.archive": "Archives", "download.pdf": "Downloaded PDFs",
+                        "download.image": "Downloaded images", "download.media": "Downloaded video and audio"]
     var body: some View {
         let rules = model.learnedRules
         let accepted = rules.values.reduce(0) { $0 + $1.accepted }, dismissed = rules.values.reduce(0) { $0 + $1.dismissed }

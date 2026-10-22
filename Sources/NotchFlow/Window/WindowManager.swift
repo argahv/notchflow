@@ -33,8 +33,14 @@ import Quartz
         let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
         tracking = area; addTrackingArea(area); super.updateTrackingAreas()
     }
-    override func mouseEntered(with event: NSEvent) { model?.windows?.cancelDismissal(); model?.hoverBegan() }
-    override func mouseExited(with event: NSEvent) { model?.hoverEnded(); model?.windows?.scheduleLeave() }
+    override func mouseEntered(with event: NSEvent) {
+        if model?.windows?.ignoresRealPointer == true { return }
+        model?.windows?.cancelDismissal(); model?.hoverBegan()
+    }
+    override func mouseExited(with event: NSEvent) {
+        if model?.windows?.ignoresRealPointer == true { return }
+        model?.hoverEnded(); model?.windows?.scheduleLeave()
+    }
     override func scrollWheel(with event: NSEvent) {
         // A deliberate sideways swipe over the preview switches the half under the pointer to the next
         // item of its kind. Vertical scrolling is never taken for this.
@@ -280,10 +286,24 @@ import Quartz
 
     /// The pointer counts as inside a little beyond the edge, so a natural move toward a control
     /// near the rim doesn't collapse the surface.
+    #if DEBUG
+    /// Scripted QA: the real pointer's position, movement, drags and clicks are ignored, so a scripted run isn't
+    /// moved by someone using the Mac. The Debug channel's `pointer:scripted` and `pointer:real` set it.
+    var scriptedPointer = false
+    #endif
+    var ignoresRealPointer: Bool {
+        #if DEBUG
+        return scriptedPointer
+        #else
+        return false
+        #endif
+    }
+
     var pointerInside: Bool {
+        if ignoresRealPointer { return false }
         // During a morph the technical NSPanel can be larger than the visible surface. Using the
         // panel frame would treat transparent padding as hovered and prevent dismissal indefinitely.
-        panel.isVisible && frame(for: model.form.size).insetBy(dx: -10, dy: -10).contains(NSEvent.mouseLocation)
+        return panel.isVisible && frame(for: model.form.size).insetBy(dx: -10, dy: -10).contains(NSEvent.mouseLocation)
     }
     func scheduleLeave() {
         cancelDismissal()
@@ -312,17 +332,18 @@ import Quartz
     /// notch lights it, and a file drag heading for it opens a drop target.
     private func installPointerTracking() {
         if let moved = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved, handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.pointerMoved() }
+            MainActor.assumeIsolated { if self?.ignoresRealPointer == false { self?.pointerMoved() } }
         }) { monitors.append(moved) }
         if let dragged = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDragged, handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.pointerDragged() }
+            MainActor.assumeIsolated { if self?.ignoresRealPointer == false { self?.pointerDragged() } }
         }) { monitors.append(dragged) }
         if let released = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp, handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.dragFinished() }
+            MainActor.assumeIsolated { if self?.ignoresRealPointer == false { self?.dragFinished() } }
         }) { monitors.append(released) }
         if let outside = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.model.interaction.presentation == .expanded, !self.pointerInside, !self.model.interaction.pinned else { return }
+                guard let self, !self.ignoresRealPointer, self.model.interaction.presentation == .expanded, !self.pointerInside,
+                      !self.model.interaction.pinned else { return }
                 self.close()
             }
         }) { monitors.append(outside) }

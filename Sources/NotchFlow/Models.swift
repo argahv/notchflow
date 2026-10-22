@@ -117,6 +117,10 @@ struct QuickApp: Identifiable, Equatable {
     /// A mode chosen by the person; it wins over inference until cleared.
     @Published var pinnedWorkMode: WorkMode? { didSet { save("pinnedWorkMode", pinnedWorkMode?.rawValue ?? "") } }
     @Published var modeDetectorsOff: Set<ModeDetector> { didSet { save("modeDetectorsOff", modeDetectorsOff.map(\.rawValue).sorted()) } }
+    /// A finished archive, PDF, image or video comes with a suggestion in place of its plain notice.
+    @Published var downloadSuggestions: Bool { didSet { save("downloadSuggestions", downloadSuggestions) } }
+    /// While a focus timer runs, only work that needs you comes through (see `FlowGuardian`).
+    @Published var flowGuardian: Bool { didSet { save("flowGuardian", flowGuardian) } }
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -124,6 +128,7 @@ struct QuickApp: Identifiable, Equatable {
                                     "bridgeEnabled": true, "notchWidth": 190.0, "hoverDelay": 0.12,
                                     "showBattery": false, "historyRetentionDays": 30, "approvalWait": 25, "clipboardRetentionHours": 24, "contextAware": true,
                                     "suggestionsEnabled": true, "quietHoursStart": 22, "quietHoursEnd": 8, "workModesEnabled": true,
+                                    "downloadSuggestions": true, "flowGuardian": true,
                                     "quickApps": ["com.apple.Terminal", "com.microsoft.VSCode", "com.apple.finder", "com.apple.Safari", "com.apple.Notes"]])
         overlayEnabled = defaults.bool(forKey: "overlayEnabled")
         simulatedNotch = defaults.bool(forKey: "simulatedNotch")
@@ -166,6 +171,8 @@ struct QuickApp: Identifiable, Equatable {
         workModesEnabled = defaults.bool(forKey: "workModesEnabled")
         pinnedWorkMode = WorkMode(rawValue: defaults.string(forKey: "pinnedWorkMode") ?? "")
         modeDetectorsOff = Set((defaults.stringArray(forKey: "modeDetectorsOff") ?? []).compactMap(ModeDetector.init(rawValue:)))
+        downloadSuggestions = defaults.bool(forKey: "downloadSuggestions")
+        flowGuardian = defaults.bool(forKey: "flowGuardian")
     }
 
     var modeSettings: ModeSettings {
