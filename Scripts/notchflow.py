@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 import re
+import shlex
 import secrets
 import stat
 import subprocess
@@ -246,7 +247,41 @@ TEST_RUNNERS = ("swift test", "npm test", "npm run test", "pnpm test", "pnpm run
                 "npx jest", "npx vitest", "npx playwright test", "jest", "vitest", "pytest", "python -m pytest",
                 "python3 -m pytest", "python -m unittest", "python3 -m unittest", "go test", "cargo test", "rspec",
                 "bundle exec rspec", "rails test", "mvn test", "gradle test", "./gradlew test", "phpunit",
-                "vendor/bin/phpunit", "dotnet test", "mix test", "make test", "ctest")
+                "vendor/bin/phpunit", "dotnet test", "mix test", "make test", "ctest", "deno test")
+
+def command_segments(command):
+    """Split shell commands on unquoted operators, or return no segments for malformed quoting."""
+    segments, current = [], []
+    quote = None
+    escaped = False
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif char == "\\" and quote != "'":
+            current.append(char)
+            escaped = True
+        elif quote:
+            current.append(char)
+            if char == quote:
+                quote = None
+        elif char in ("'", '"'):
+            current.append(char)
+            quote = char
+        elif char in (";", "|", "\n") or (char == "&" and index + 1 < len(command) and command[index + 1] == "&"):
+            if char in "&|" and index + 1 < len(command) and command[index + 1] == char:
+                index += 1
+            segments.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+        index += 1
+    if quote or escaped:
+        return []
+    segments.append("".join(current))
+    return segments
 
 def runs_tests(tool_input):
     """Whether a shell tool call runs a test suite, judged where each command starts. Only this yes or
@@ -256,12 +291,49 @@ def runs_tests(tool_input):
         command = " ".join(str(part) for part in command)
     if not isinstance(command, str):
         return False
-    for segment in re.split(r"&&|\|\||[;|\n]", command[:4000]):
-        words = segment.strip().split()
-        while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", words[0]):  # FOO=1 swift test
+    for segment in command_segments(command[:4000]):
+        try:
+            words = shlex.split(segment)
+        except ValueError:  # Fall back if tokenization fails after segment boundaries are identified.
+            words = segment.strip().split()
+        while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", words[0]):  # FOO=1 pytest
             words.pop(0)
-        if words and words[0] in ("sudo", "time", "exec"):
+        while words and words[0] in ("sudo", "time", "exec"):
             words.pop(0)
+        if words and words[0] == "env":
+            words.pop(0)
+            while words:
+                if words[0] == "--":
+                    words.pop(0)
+                    break
+                if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", words[0]):
+                    words.pop(0)
+                elif words[0] in ("-i", "--ignore-environment") or words[0].startswith("--unset="):
+                    words.pop(0)
+                elif words[0] in ("-u", "--unset", "-C", "--chdir"):
+                    words = words[2:] if len(words) > 1 else []
+                else:
+                    break
+        if words and words[0] in ("uv", "poetry") and len(words) > 1 and words[1] == "run":
+            words = words[2:]
+        if words and words[0] in ("bunx", "npx"):
+            words.pop(0)
+            if words and words[0] in ("--yes", "-y"):
+                words.pop(0)
+        if words and words[0] in ("npm", "pnpm", "yarn"):
+            manager, words = words[0], words[1:]
+            if manager == "pnpm":
+                while words:
+                    if words[0] in ("-r", "--recursive", "-w", "--workspace-root") or words[0].startswith("--filter="):
+                        words.pop(0)
+                    elif words[0] in ("--filter", "--dir"):
+                        words = words[2:] if len(words) > 1 else []
+                    else:
+                        break
+            if words and words[0] == "run":
+                words.pop(0)
+            if words and (words[0] == "test" or words[0].startswith("test:")):
+                return True
         if words and words[0] == "xcodebuild" and any(word in ("test", "test-without-building") for word in words[1:]):
             return True
         text = " ".join(words)
