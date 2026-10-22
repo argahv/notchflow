@@ -154,6 +154,52 @@ screenshots, and never moves, renames or deletes them. It's off by default.
   <img src="docs/media/annotate.png" width="600" alt="The annotation editor in the notch: a highlighted line, a red box and an arrow on a screenshot of release notes, with Copy and Save Copy.">
 </p>
 
+## A next step for what you copy
+
+*New on the `feature/sixth-sense` branch, not in release 0.2 yet.* Turn on **Settings › Suggestions ›
+Suggest from what you copy**, and a copy with an obvious next step grows out of the notch with it, once:
+
+| You copy | The notch offers |
+|---|---|
+| A link | Copy Clean Link when it carries tracking parameters, Open, Keep on Shelf |
+| A color (`#0A84FF`, `rgb(…)`) | A swatch, and the same color as RGB, hex or HSL |
+| JSON | Copy Formatted or Copy Minified, every key in its order |
+| An address | Open in Maps |
+| A date or time | Remind Me (asks for Reminders the first time) |
+| An email address or phone number | New Email, Call |
+| A path to something on your Mac | Show in Finder, Open |
+| A long passage | Keep on Shelf, where Notch Actions can do more, or New Note |
+| *A finished download:* an archive | Extract (Archive Utility, the archive is kept), Show in Finder |
+| *A finished download:* a PDF, image, video or audio file | Extract Text or its other actions, kept on the shelf by reference |
+
+- **Rules on your Mac decide.** No AI service, no network, and nothing you copied is kept. Password
+  managers, apps you exclude and text that looks like a key are skipped before anything else sees them.
+- **One at a time, never in the way.** It never opens over a drag, a note you're typing, the open workspace
+  or an alert. It waits, and if the moment passes, it goes. A finished build waits behind it; a failure
+  doesn't.
+- **Why?** shows the reason it was suggested. Copies and additions come with **Undo**.
+- **It learns, on this Mac.** Each dismissal makes that kind wait longer, and five in a row turn it off until
+  you reset or unmute it. Choose Fewer, Balanced or More, switch kinds off, and set quiet hours. Quiet mode
+  and Hide private details pause it.
+- **Settings › What NotchFlow observes** says, for every capability, what it reads, why, what leaves your
+  Mac, the permission, and how to turn it off and clear it. **Diagnostics › Context Inspector** shows what
+  each suggestion was based on, without any content.
+
+**Work modes.** The notch also notices what you're doing: an editor or terminal in front (Developer), a
+call in progress (Meeting), a design app (Creative), music playing (Media). The shortcuts on hover follow
+(Activity, Clipboard and Shelf while you code; Calendar, Notes and Sound in a call), the right work ranks
+first, and suggestions lean that way and stay quiet during calls. A change has to hold for a few seconds,
+a line says which mode and why, and one click pins it. Choose Study yourself. **Settings › Work mode**
+switches it off or turns off any of its signals; it never opens the notch and reads nothing new.
+
+**Focus sessions that stay focused.** While a focus timer runs, only requests and failures come through.
+Finished work, progress and suggestions wait, without a rim or badge. When the session ends, the notch says
+"Focus session finished · 25 min · 3 updates waited" with **Review**. This covers NotchFlow's own previews;
+macOS doesn't let apps hold other apps' notifications.
+
+How it's built: [Sixth Sense architecture](docs/sixth-sense/01-architecture.md) ·
+[plan and roadmap](docs/sixth-sense/02-plan.md) · [verification](docs/sixth-sense/03-verification.md).
+
 ## A notch that keeps up
 
 **Living Split Island.** When music or a timer is playing while an agent works, hovering the notch shows
@@ -207,8 +253,8 @@ first; with a browser in front, downloads do. It never opens itself.
 
 - No account, no telemetry, no analytics, no server. It makes no network requests unless you add a GitHub
   repository or ask for a link's title.
-- Everything that touches your data is **opt-in**: clipboard, downloads, meetings, screenshots, agent
-  approvals, GitHub.
+- Everything that touches your data is **opt-in**: clipboard, copy suggestions, downloads, meetings,
+  screenshots, agent approvals, GitHub. Settings lists what each one observes and how to clear it.
 - What you drop on the notch stays on your Mac. Actions run locally, and nothing is sent to an AI service.
 - macOS permissions are requested only when you turn on the feature that needs them. NotchFlow never needs
   Accessibility or your microphone.
@@ -293,28 +339,30 @@ NotchFlow already brings files, agent activity, notifications and everyday tools
 
 These are **ideas and planned enhancements**, not a list of shipped features. Some build on functionality already in the developer preview; scope and timing may change as the project evolves.
 
-| Direction | What I'm exploring |
-|---|---|
-| **Intent Switch** | Context-aware modes for coding, studying, meetings, presentations and media, with controls that adapt to what you're doing. |
-| **Predictive Actions** | Relevant suggestions from clear signals: a copied address could open Maps, or a new PDF could offer document actions. |
-| **Magic Drop, expanded** | Build on the existing drop shelf and local actions with richer batch conversions, archives and file workflows. |
-| **Universal Voice Actions** | Optional push-to-talk commands to dictate, transform selected text and trigger approved actions. |
-| **Workspace Time Machine** | Save and restore supported apps, windows, documents and research sessions. |
-| **Life Moments** | Timely, quiet prompts for upcoming events, reminders and routines, rather than another noisy notification feed. |
-| **Meeting Guardian** | Extend existing meeting links with supported call controls, audio checks and presentation-aware privacy settings. |
-| **Memory Shelf** | Evolve the opt-in clipboard into a searchable, private history, potentially with optional on-device semantic search. |
-| **Device Continuity** | Explore an optional iPhone companion for sending links, snippets, files and user-authorized events to the Mac. |
-| **Flow Guardian** | Focus-aware suggestions, fewer interruptions and a concise catch-up when you're ready. |
-| **Teach My Mac** | User-defined, reviewable workflows that turn repetitive tasks into safe, reusable actions. |
-| **Universal Live Activities, expanded** | Extend today's agent/build/download stack to more real tasks such as conversions, recordings, timers and integrations. |
+| Direction | What I'm exploring | Status |
+|---|---|---|
+| **Intent Switch** | Context-aware modes for coding, studying, meetings, presentations and media, with controls that adapt to what you're doing. | Built on `feature/sixth-sense`: six work modes |
+| **Predictive Actions** | Relevant suggestions from clear signals: a copied address could open Maps, or a new PDF could offer document actions. | Built: suggestions for copies and finished downloads |
+| **Magic Drop, expanded** | Build on the existing drop shelf and local actions with richer batch conversions, archives and file workflows. | Built: Action Chains, Create ZIP, QR Code |
+| **Universal Voice Actions** | Optional push-to-talk commands to dictate, transform selected text and trigger approved actions. | Planned |
+| **Workspace Time Machine** | Save and restore supported apps, windows, documents and research sessions. | Planned |
+| **Life Moments** | Timely, quiet prompts for upcoming events, reminders and routines, rather than another noisy notification feed. | Planned |
+| **Meeting Guardian** | Extend existing meeting links with supported call controls, audio checks and presentation-aware privacy settings. | Partial: Meeting mode quiets suggestions |
+| **Memory Shelf** | Evolve the opt-in clipboard into a searchable, private history, potentially with optional on-device semantic search. | Partial: ⌘K searches shelf and clipboard |
+| **Device Continuity** | Explore an optional iPhone companion for sending links, snippets, files and user-authorized events to the Mac. | Planned |
+| **Flow Guardian** | Focus-aware suggestions, fewer interruptions and a concise catch-up when you're ready. | Built: focus-session holds and summary |
+| **Teach My Mac** | User-defined, reviewable workflows that turn repetitive tasks into safe, reusable actions. | Partial: Action Chains are its foundation |
+| **Universal Live Activities, expanded** | Extend today's agent/build/download stack to more real tasks such as conversions, recordings, timers and integrations. | Partial: chains report as tasks |
 
 The principle behind all twelve: **invisible when unnecessary, magical when needed.** Features should be native, lightweight, privacy-first and useful without a cloud account or paid AI service. Optional capabilities will ask for permissions when needed; nothing sensitive should be sent off-device silently.
+
+Built means implemented and tested on the `feature/sixth-sense` branches, not in release 0.2; see [the plan](docs/sixth-sense/02-plan.md).
 
 **Want to help shape these?** Share use cases in [Discussions](https://github.com/argahv/notchflow/discussions), or check [Contributing](CONTRIBUTING.md) to help turn ideas into tested features.
 
 ## Status
 
-**Developer preview (0.2).** NotchFlow is built and tested on a MacBook Air with a notch: 110 Swift and 24
+**Developer preview (0.2).** NotchFlow is built and tested on a MacBook Air with a notch: 194 Swift and 24
 Python tests run in CI on every push, alongside Debug and universal Release builds, plus end-to-end hook
 checks and frame-by-frame recordings of its transitions. The newest features (the portal, screenshots,
 actions, the agent heartbeat, the split island, Time Travel and the sound island) were run on a Debug build
@@ -350,6 +398,8 @@ Near term, roughly in order. Each has or will get an issue:
 3. Performance instrumentation (signposts, footprint in the profiler) and the long-session memory question.
 4. Smarter agent integration: better test-run detection, more agents through the [event contract](docs/INTEGRATIONS.md).
 5. Ultra glass: zero-copy frames, then on-screen verification.
+6. Sixth Sense: more context sources and suggestion rules, then workspaces and workflows built on the same
+   action catalog. Priorities and platform limits are in the [plan](docs/sixth-sense/02-plan.md).
 
 Not planned for now: accounts, cloud sync, telemetry, or sending anything you drop to an AI service.
 
@@ -372,7 +422,8 @@ python3 -I Tests/test_bridge.py     # the event CLI and agent hooks, on any OS
 
 - `Sources/NotchCore`: the testable core, covering the activity engine, ranking, geometry, GitHub mapping,
   context rules, content rules, and the rules behind the portal, shelf, screenshots, actions, agent pulse,
-  split island, Time Travel and sound.
+  split island, Time Travel and sound, plus Sixth Sense: context events, the intent engine, the action
+  catalog, surface tiers and the privacy catalog.
 - `Sources/NotchFlow`: the app. `Shell` (surface and layout), `Design` (tokens, silhouette, materials,
   motion), `Surfaces` (features), `Features` (providers and services), `Window` (panel, input, geometry),
   `Graphics` (experimental Metal glass).
@@ -380,8 +431,8 @@ python3 -I Tests/test_bridge.py     # the event CLI and agent hooks, on any OS
 
 Design and architecture: [Obsidian & Silver design](docs/obsidian-silver/01-design.md) · [dynamic hover](docs/obsidian-silver/03-dynamic-hover.md) ·
 [activity engine](docs/architecture/activity-engine.md) · [agent integrations](docs/architecture/agent-integrations.md) ·
-[context engine](docs/architecture/context-engine.md) · [motion](docs/design/motion-system.md) ·
-[acceptance tests](docs/testing/acceptance-tests.md).
+[context engine](docs/architecture/context-engine.md) · [Sixth Sense](docs/sixth-sense/01-architecture.md) ·
+[motion](docs/design/motion-system.md) · [acceptance tests](docs/testing/acceptance-tests.md).
 
 ## License
 

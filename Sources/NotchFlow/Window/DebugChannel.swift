@@ -42,7 +42,11 @@ import AppKit
         case "hover": if argument == "enter" { model.hoverBegan() } else { model.pointerLeft() }
         case "note": if argument == "new" { model.newNote() } else { model.closeNote() }
         case "detail": model.toggleDetail(argument)
-        case "notification": if argument == "view" { model.viewNotificationDetails() } else { model.dismissNotification() }
+        case "notification":
+            // "notification:view", "notification:primary" (its own button: Review, Join, Show…), anything else dismisses.
+            if argument == "view" { model.viewNotificationDetails() }
+            else if argument == "primary", case .notification(let record) = model.glanceLead { model.notificationAction(record).perform() }
+            else { model.dismissNotification() }
         case "query": model.commandQuery = argument
         case "timer": if let minutes = Int(argument) { model.startTimer(minutes: minutes) } else { model.cancelTimer() }
         case "media": model.preferences.mediaEnabled = argument == "on"
@@ -55,10 +59,67 @@ import AppKit
             // "clip:<text>" or "clip:1password:<text>" (as if copied in a password manager).
             if argument.hasPrefix("1password:") {
                 model.clipboard.consider(String(argument.dropFirst(10)), types: [], app: "com.1password.1password", appName: "1Password")
+            } else if argument.hasPrefix("safari:") {
+                model.clipboard.consider(String(argument.dropFirst(7)), types: [], app: "com.apple.Safari", appName: "Safari")
             } else if argument.hasPrefix("concealed:") {
                 model.clipboard.consider(String(argument.dropFirst(10)), types: ["org.nspasteboard.ConcealedType"], app: nil, appName: nil)
             } else {
                 model.clipboard.consider(argument.replacingOccurrences(of: "\\n", with: "\n"), types: [], app: "com.apple.dt.Xcode", appName: "Xcode")
+            }
+        case "suggest":
+            // "suggest:on|off" (copy suggestions), "suggest:run:<index>", "suggest:why", "suggest:dismiss", "suggest:undo",
+            // "suggest:reset" (learning), "suggest:sensitivity:<fewer|balanced|more>".
+            let parts = argument.split(separator: ":").map(String.init)
+            switch parts.first {
+            case "on": model.preferences.suggestionsEnabled = true; model.preferences.clipboardSuggestions = true
+            case "off": model.preferences.clipboardSuggestions = false
+            case "run":
+                if let index = parts.count > 1 ? Int(parts[1]) : 0, let actions = model.suggestion?.actions, actions.indices.contains(index) {
+                    model.runSuggestion(actions[index])
+                }
+            case "why": model.toggleSuggestionWhy()
+            case "dismiss": model.dismissSuggestion()
+            case "undo": model.undoSuggestion()
+            case "reset": model.resetSuggestionLearning()
+            case "sensitivity": if parts.count > 1, let value = SuggestionSensitivity(rawValue: parts[1]) { model.preferences.suggestionSensitivity = value }
+            default: break
+            }
+        case "rescue":
+            // "rescue:<activity id>" opens its handoff brief; "rescue:copy" copies it (to the real clipboard).
+            if argument == "copy" { model.copyHandoff() } else if let record = model.record(argument) { model.prepareHandoff(record) }
+        case "chain":
+            // "chain:<preset id>": the preset on every shelf item it accepts, as if chosen in the action surface.
+            guard let chain = ActionChain.presets.first(where: { $0.id == argument }) else { break }
+            let ids = model.shelf.items.filter { chain.accepts.contains(ContentInspector.context(for: $0, shelf: model.shelf).kind) }.map(\.id)
+            model.openActions(ids)
+            model.runChain(chain)
+        case "next":
+            // "next:<index>": the Next Action button after an action made files.
+            if let index = Int(argument), model.nextSteps.indices.contains(index) { model.runNext(model.nextSteps[index]) }
+        case "pointer":
+            // "pointer:scripted" ignores the real pointer (position, movement, drags, clicks); "pointer:real" undoes it.
+            windows.scriptedPointer = argument == "scripted"
+        case "focus":
+            // "focus:<seconds>" starts a focus session that long; "focus:stop" ends it early; "focus:guard:on|off".
+            if argument == "stop" { model.cancelTimer() }
+            else if argument.hasPrefix("guard:") { model.preferences.flowGuardian = argument.hasSuffix(":on") }
+            else if let seconds = Double(argument) { model.startFocus(seconds: seconds) }
+        case "privacy": model.preferences.privacy = argument == "on"
+        case "front":
+            // "front:<bundle id>|<name>": the app in front, through the same gate as the real observer; real
+            // activations are ignored from then on. "front:real" hands the source back to the real observer.
+            if argument == "real" { model.contextEngine.debugScripted.remove(.frontmostApp); break }
+            let parts = argument.split(separator: "|", maxSplits: 1).map(String.init)
+            model.contextEngine.debugEmit(.frontmostApp(bundleID: parts.first, name: parts.count > 1 ? parts[1] : nil))
+        case "mode":
+            // "mode:pin:<mode>", "mode:auto", "mode:follow:on|off", "mode:settle:<seconds>".
+            let parts = argument.split(separator: ":").map(String.init)
+            switch parts.first {
+            case "pin": if parts.count > 1, let mode = WorkMode(rawValue: parts[1]) { model.preferences.pinnedWorkMode = mode }
+            case "auto": model.preferences.pinnedWorkMode = nil
+            case "follow": model.preferences.workModesEnabled = parts.count > 1 && parts[1] == "on"
+            case "settle": if parts.count > 1, let seconds = Double(parts[1]) { model.debugSetModeSettle(seconds) }
+            default: break
             }
         case "nowplaying":
             // "nowplaying:<title>|<artist>" or "nowplaying:off"
@@ -181,6 +242,15 @@ import AppKit
                 windows.snapshot(to: AppFiles.root.appendingPathComponent("debug/\(name).png"), light: parts.dropFirst().first == "light")
             }
         case "status":
+            let chainStep: String = model.chainProgress.map { "\($0.chain.id) · \($0.label)" } ?? "-"
+            let next: String = model.nextSteps.map(\.action.rawValue).joined(separator: ",")
+            let chainLine: String = "chain: \(chainStep) · next \(next)"
+            let hits: [String] = model.commandQuery.isEmpty ? [] : model.commandResults.map(\.id).filter { $0.hasPrefix("shelf-") || $0.hasPrefix("clip-") }
+            var offered = false
+            if case .notification(let shown) = model.glanceLead { offered = AgentRescue.canHandOff(shown.event) }
+            let briefTitle: String = model.handoffDraft.split(separator: "\n").first.map(String.init) ?? "-"
+            let handoffLine: String = "handoff: offered \(offered) · \(briefTitle) · \(model.handoffDraft.count) chars · copied \(model.handoffCopied)"
+            let searchLine: String = "search: " + (hits.isEmpty ? "-" : hits.map { String($0.prefix(5)) }.joined(separator: ","))
             let lines = model.providers.statuses.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.label)" }
                 + ["route: \(model.route) · \(model.interaction.presentation)",
                    "hover: \(model.hoverChoice.primary?.id ?? "-") + \(model.hoverChoice.secondary?.id ?? "-") +\(model.hoverChoice.others) · pin: \(model.hoverPin ?? "-")",
@@ -198,7 +268,19 @@ import AppKit
                    "timeline: \(model.timeline.count) · at \(model.timelineCursor.index): \(model.timelineEntry.map { "\($0.kind.rawValue) \($0.title)" } ?? "-") · actions: \(model.timelineEntry.map { model.timelineActions($0).map(\.title).joined(separator: ",") } ?? "-")",
                    "celebration: \(model.celebration.map { "\($0.title) — \($0.detail) (\($0.batch.count))" } ?? "-")",
                    "annotations: \(model.annotations.items.map(\.tool.rawValue).joined(separator: ",")) · saved: \(model.annotatedCopy?.lastPathComponent ?? "-")",
-                   "mode: \(model.preferences.mode?.title ?? "Custom")"]
+                   "mode: \(model.preferences.mode?.title ?? "Custom")",
+                   "suggestion: \(model.suggestion.map { "\($0.rule) · \($0.title) · \($0.actions.map(\.title).joined(separator: ",")) · score \(String(format: "%.2f", $0.score))" } ?? "-") · pending \(model.pendingSuggestion?.rule ?? "-") · why \(model.suggestionWhy) · result \(model.suggestionResult.map { "\($0.title) — \($0.detail ?? "") undo=\($0.canUndo)" } ?? "-")",
+                   "context sources: " + ContextSource.allCases.map { source in
+                       let state = model.contextEngine.states[source]
+                       return "\(source.rawValue)=\(state?.running == true ? "on" : "off")/\(state?.delivered ?? 0)/\(state?.coalesced ?? 0)"
+                   }.joined(separator: " "),
+                   "inspector: " + model.contextEngine.log.prefix(6).map(\.text).joined(separator: " | "),
+                   "learning: " + model.learnedRules.sorted { $0.key < $1.key }.map { "\($0.key) +\($0.value.accepted) -\($0.value.dismissed) ~\($0.value.ignored)" }.joined(separator: ", "),
+                   "clipboard: history \(model.clipboard.enabled) · items \(model.clipboard.items.count) · skipped \(model.clipboard.skipped)",
+                   chainLine, searchLine, handoffLine,
+                   "waiting: " + model.waitingGlances.map { "\($0.kind.rawValue)/\($0.tier.title)" }.joined(separator: ","),
+                   "focus: \(model.focus.active ? (model.focusing ? "holding" : "paused") : "off") · waiting \(model.focus.entries.count) · last \(model.focusSummary.map { "\($0.record) \($0.detail) waited=\($0.waited)" } ?? "-")",
+                   "work mode: \(model.workMode.rawValue) · \(model.workModeReason) · pending \(model.pendingModeReading?.mode.rawValue ?? "-") · shortcuts \(model.workMode.shortcuts.map(\.rawValue).joined(separator: ",")) · line \(model.showsModeLine)"]
             try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)
         case "dumpHooks":
             let folder = AppFiles.root.appendingPathComponent("debug", isDirectory: true)

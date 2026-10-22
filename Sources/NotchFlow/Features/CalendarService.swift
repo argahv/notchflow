@@ -26,10 +26,36 @@ struct CalendarItem: Identifiable {
             DispatchQueue.main.async { self?.status = error?.localizedDescription ?? (granted ? "Calendar connected" : "Calendar access denied. Change it in System Settings."); self?.refresh() }
         }
     }
-    func connectReminders() {
+    func connectReminders(then completion: ((Bool) -> Void)? = nil) {
         store.requestFullAccessToReminders { [weak self] granted, error in
-            DispatchQueue.main.async { self?.status = error?.localizedDescription ?? (granted ? "Reminders connected" : "Reminders access denied. Change it in System Settings."); self?.refresh() }
+            DispatchQueue.main.async {
+                self?.status = error?.localizedDescription ?? (granted ? "Reminders connected" : "Reminders access denied. Change it in System Settings.")
+                self?.refresh()
+                completion?(granted)
+            }
         }
+    }
+    var remindersAllowed: Bool { EKEventStore.authorizationStatus(for: .reminder) == .fullAccess }
+
+    /// Adds a reminder to the default list and returns its identifier, so it can be undone.
+    func addReminder(title: String, due: Date) throws -> String {
+        guard let list = store.defaultCalendarForNewReminders() else {
+            throw NSError(domain: "NotchFlow", code: 1, userInfo: [NSLocalizedDescriptionKey: "Reminders has no default list."])
+        }
+        let reminder = EKReminder(eventStore: store)
+        reminder.title = title
+        reminder.calendar = list
+        reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due)
+        reminder.addAlarm(EKAlarm(absoluteDate: due))
+        try store.save(reminder, commit: true)
+        refresh()
+        return reminder.calendarItemIdentifier
+    }
+
+    /// Removes a reminder this app just added (Undo). Anything else is left alone.
+    func removeReminder(_ identifier: String) {
+        guard let reminder = store.calendarItem(withIdentifier: identifier) as? EKReminder else { return }
+        do { try store.remove(reminder, commit: true); refresh() } catch { status = error.localizedDescription }
     }
     func refresh() {
         if EKEventStore.authorizationStatus(for: .event) == .fullAccess {

@@ -27,6 +27,21 @@ struct ActionsSurface: View {
                         }
                     }
                 }
+                let chains = model.actionChains
+                if !chains.isEmpty {
+                    // A few multi-step workflows that fit these items, run as one task.
+                    HStack(spacing: 6) {
+                        Text("Workflows").font(TypeScale.meta).foregroundStyle(Ink.secondary)
+                        ForEach(chains) { chain in
+                            Button { model.runChain(chain) } label: { Label(chain.title, systemImage: "arrow.triangle.branch") }
+                                .buttonStyle(PillButtonStyle()).help("\(chain.summary). Originals aren't changed.")
+                                .disabled(model.actionRun.isProcessing)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .frame(height: Metrics.chainRow)
+                    .reveal(.detail)
+                }
                 ActionResultPanel(model: model)
             } else {
                 CompactEmptyState(symbol: "tray", title: "Nothing to act on", detail: "Drop something on the notch, or pick an item on the shelf.")
@@ -131,7 +146,8 @@ private struct ActionResultPanel: View {
         case .processing(let action, let progress):
             HStack(spacing: 10) {
                 if let progress { ProgressLine(value: progress).frame(width: 120) } else { ProgressView().controlSize(.small).tint(Ink.silver) }
-                Text("\(action.title)…").font(TypeScale.secondary).foregroundStyle(Ink.secondary)
+                Text(model.chainProgress.map { "\($0.chain.title) · \($0.label)…" } ?? "\(action.title)…")
+                    .font(TypeScale.secondary).foregroundStyle(Ink.secondary).contentTransition(.opacity)
                 Spacer()
                 Button("Cancel") { model.cancelAction() }.buttonStyle(PillButtonStyle())
             }
@@ -199,7 +215,14 @@ private struct CompletedPanel: View {
                 }
                 Spacer()
                 Button("Undo") { model.undoAction() }.buttonStyle(PillButtonStyle()).help("Remove what this made")
-                Button("Show") { model.navigate(.shelf) }.buttonStyle(PillButtonStyle(prominent: true))
+                // The step that usually follows what was just made; Show stays one click away.
+                if let next = model.nextSteps.first {
+                    Button("Show") { model.navigate(.shelf) }.buttonStyle(PillButtonStyle())
+                    Button { model.runNext(next) } label: { Label(next.action.title, systemImage: "arrow.forward") }
+                        .buttonStyle(PillButtonStyle(prominent: true)).help(next.reason).accessibilityHint(next.reason)
+                } else {
+                    Button("Show") { model.navigate(.shelf) }.buttonStyle(PillButtonStyle(prominent: true))
+                }
             }
             .padding(.horizontal, 12).frame(height: Metrics.actionCreated).nookMaterial(.ambient)
         case .done(let message):
@@ -239,6 +262,8 @@ extension ContentAction {
         case .wordCount: "number"
         case .detectLanguage: "chevron.left.forwardslash.chevron.right"
         case .linkPreview: "globe"
+        case .qrCode: "qrcode"
+        case .createArchive: "archivebox"
         case .mediaInfo: "info.circle"
         case .extractFrame: "photo"
         case .convertM4A: "waveform"

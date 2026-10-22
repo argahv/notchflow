@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import CoreImage
+import CoreImage.CIFilterBuiltins
 import ImageIO
 import LinkPresentation
 import PDFKit
@@ -141,6 +142,61 @@ enum ActionExecutor {
 
     private static func created(_ file: URL) -> Output { Output(outcome: .created([file.lastPathComponent]), files: [file]) }
     private static func size(_ bytes: Int) -> String { ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file) }
+
+    // MARK: Links and archives
+
+    /// A QR code for a link, made on this Mac with Core Image: black on white, large enough to scan from a screen.
+    static func qrCode(_ link: URL) throws -> Output {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(link.absoluteString.utf8)
+        filter.correctionLevel = "M"
+        guard let code = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 12, y: 12)),
+              let image = CIContext().createCGImage(code, from: code.extent) else { throw Failure.unwritable }
+        return try created(write(image, as: .png, named: "QR " + (link.host ?? "link")))
+    }
+
+    /// One ZIP of the given files and folders, made by the system's own archiver (NSFileCoordinator). The
+    /// originals are only read: files are cloned into a temporary folder, which is removed afterwards.
+    static func archive(_ urls: [URL], progress: @escaping Progress) async throws -> Output {
+        try await Task.detached(priority: .userInitiated) {
+            guard let first = urls.first else { throw Failure.unreadable }
+            let staging = FileManager.default.temporaryDirectory.appendingPathComponent("NotchFlow-zip-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: staging) }
+            let isFolder = (try? first.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+            let root: URL
+            if urls.count == 1 && isFolder {
+                root = first
+            } else {
+                let name = urls.count == 1 ? first.deletingPathExtension().lastPathComponent : "Archive"
+                root = staging.appendingPathComponent(ShelfPolicy.safeFileName(name, fallback: "Archive"), isDirectory: true)
+                try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                var used: Set<String> = []
+                for (index, url) in urls.enumerated() {
+                    try Task.checkCancellation()
+                    var name = url.lastPathComponent, copy = 2
+                    while used.contains(name) {
+                        name = url.deletingPathExtension().lastPathComponent + " \(copy)" + (url.pathExtension.isEmpty ? "" : "." + url.pathExtension)
+                        copy += 1
+                    }
+                    used.insert(name)
+                    try FileManager.default.copyItem(at: url, to: root.appendingPathComponent(name))
+                    progress(Double(index + 1) / Double(urls.count + 1))
+                }
+            }
+            var zipped: URL?, failure: Error?, coordination: NSError?
+            NSFileCoordinator().coordinate(readingItemAt: root, options: .forUploading, error: &coordination) { zip in
+                do {
+                    let output = try ShelfService.makeCopyFolder().appendingPathComponent(root.lastPathComponent + ".zip")
+                    try FileManager.default.copyItem(at: zip, to: output)
+                    zipped = output
+                } catch { failure = error }
+            }
+            if let error = coordination ?? failure { throw error }
+            guard let zipped else { throw Failure.unwritable }
+            progress(1)
+            return created(zipped)
+        }.value
+    }
 
     // MARK: PDFs
 

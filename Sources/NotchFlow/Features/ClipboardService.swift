@@ -10,13 +10,20 @@ struct ClipItem: Identifiable, Equatable {
 }
 
 /// Clipboard history: off by default, text only, kept in memory (gone when NotchFlow quits), and
-/// pruned by age. macOS has no clipboard-change notification, so while it's on the pasteboard's
-/// change count is checked about once a second; that check reads nothing else.
+/// pruned by age. macOS has no clipboard-change notification, so while history or copy suggestions are
+/// on, the pasteboard's change count is checked about once a second; that check reads nothing else.
+/// Both features share that one check and the same filters.
 @MainActor final class ClipboardService: ObservableObject {
     @Published private(set) var items: [ClipItem] = []
     /// Copies left out because they came from a password manager, were marked concealed, or looked like a secret.
     @Published private(set) var skipped = 0
+    /// History is on.
     private(set) var enabled = false
+    /// Copy suggestions are on: each copy that passes the filters goes to `onCopy`, and nowhere else.
+    private var observingCopies = false
+    var onCopy: ((ClipboardSignal) -> Void)?
+    /// Apps the person added to the exclusions in Settings.
+    private var userExcluded: Set<String> = []
     private var retention: TimeInterval = 86_400
     private var timer: Timer?
     private var lastChange = NSPasteboard.general.changeCount
@@ -35,11 +42,14 @@ struct ClipItem: Identifiable, Equatable {
         "com.agilebits.onepassword", "com.typeit4me.clipping", "de.petermaurer.TransientPasteboardType", "Pasteboard generator type"
     ]
 
-    func configure(enabled: Bool, retention: TimeInterval, lowPower: Bool) {
+    func configure(enabled: Bool, suggestions: Bool = false, retention: TimeInterval, lowPower: Bool, excluded: Set<String> = []) {
         self.retention = retention
         self.enabled = enabled
+        observingCopies = suggestions
+        userExcluded = excluded
         timer?.invalidate(); timer = nil
-        guard enabled else { items.removeAll(); skipped = 0; return }
+        if !enabled { items.removeAll(); skipped = 0 }
+        guard enabled || suggestions else { return }
         lastChange = NSPasteboard.general.changeCount   // what was copied before turning it on isn't recorded
         let interval: TimeInterval = lowPower ? 2 : 1
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.check() } }
@@ -61,15 +71,37 @@ struct ClipItem: Identifiable, Equatable {
 
     /// The filters every copy goes through before it's kept.
     func consider(_ text: String?, types: Set<String>, app: String?, appName: String?) {
-        guard enabled else { return }
-        if !types.isDisjoint(with: Self.concealedTypes) || app.map(Self.excludedApps.contains) == true { skipped += 1; return }
+        guard enabled || observingCopies else { return }
+        let excluded = app.map { Self.excludedApps.contains($0) || userExcluded.contains($0) } ?? false
+        if !types.isDisjoint(with: Self.concealedTypes) || excluded { skipped += 1; return }
         guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         if ClipClassifier.looksSecret(text) { skipped += 1; return }
         let clipped = String(text.prefix(10_000))
-        let pinned = items.first(where: { $0.text == clipped })?.pinned ?? false
-        items.removeAll { $0.text == clipped }
-        items.insert(ClipItem(text: clipped, kind: ClipClassifier.kind(of: clipped), date: Date(), source: appName, pinned: pinned), at: 0)
-        trim()
+        if enabled {
+            let pinned = items.first(where: { $0.text == clipped })?.pinned ?? false
+            items.removeAll { $0.text == clipped }
+            items.insert(ClipItem(text: clipped, kind: ClipClassifier.kind(of: clipped), date: Date(), source: appName, pinned: pinned), at: 0)
+            trim()
+        }
+        if observingCopies {
+            onCopy?(ClipboardSignal(text: clipped, sourceApp: app, sourceName: appName, existingPath: Self.existingPath(clipped)))
+        }
+    }
+
+    /// A copied absolute or home-relative path that exists on this Mac, expanded. Nothing else is looked up.
+    static func existingPath(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count < 1024, !trimmed.contains("\n"), trimmed.hasPrefix("/") || trimmed.hasPrefix("~/") else { return nil }
+        let path = (trimmed as NSString).expandingTildeInPath
+        return FileManager.default.fileExists(atPath: path) ? path : nil
+    }
+
+    /// Puts text on the clipboard as NotchFlow itself, so it's neither recorded nor suggested on.
+    func write(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        ownChange = pasteboard.changeCount; lastChange = pasteboard.changeCount
     }
 
     /// Puts an item back on the clipboard. Pasting it is up to the person (no keystrokes are sent).

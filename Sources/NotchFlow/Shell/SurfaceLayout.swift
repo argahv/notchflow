@@ -62,6 +62,16 @@ enum Metrics {
     static let timelineStage = 82.0
     /// Sound Island's glance.
     static let soundGlance = 76.0
+    /// A suggestion: 11 pt above and below a 44 pt row; "Why?" adds a gap and two lines of reason.
+    static let suggestionGlance = 66.0
+    static let suggestionWhy = 38.0
+    /// Room for the text beside two action pills, "Why?" and dismiss.
+    static let suggestionWing = 176.0
+    /// The Workflows row under the actions, when a chain fits the items.
+    static let chainRow = 26.0
+    /// Agent Rescue: the line saying nothing is sent, and the editable brief.
+    static let handoffNote = 32.0
+    static let handoffEditor = 190.0
     /// A one-time discovery tip under the quick-access shortcuts.
     static let hintRow = 18.0
     static let historyRow = 44.0
@@ -131,7 +141,8 @@ enum Metrics {
             // from text), so there is no layout feedback loop and no horizontal jitter.
             switch model.glanceLead {
             case .quickAccess:
-                let hint = model.preferences.portalEnabled && !model.preferences.portalHintSeen
+                // One line under the shortcuts at most: the drop tip, or else which work mode they're for.
+                let hint = model.preferences.portalEnabled && !model.preferences.portalHintSeen || model.showsModeLine
                 return resolve(.content(width: display.notchWidth + 2 * Metrics.quickWing + (hint ? 40 : 0),
                                         height: Metrics.quickHeight + (hint ? Metrics.hintRow + 6 : 0)),
                                wing: Metrics.quickWing, ear: 8, corner: 18)
@@ -148,6 +159,11 @@ enum Metrics {
             case .capture:
                 return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.captureGlance),
                                wing: Metrics.splitWing, ear: 12, corner: 24)
+            case .suggestion:
+                // Opening "Why?" deepens the same shape rather than adding a panel.
+                let why = model.suggestionWhy && model.suggestionResult == nil ? Metrics.suggestionWhy : 0
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.suggestionWing, height: Metrics.suggestionGlance + why),
+                               wing: Metrics.suggestionWing, ear: 10, corner: 22)
             default:
                 let depth = Double(model.glanceStackDepth)
                 return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing,
@@ -233,7 +249,10 @@ enum Metrics {
             let rows = (count + Metrics.actionColumns - 1) / Metrics.actionColumns
             var height = pad + Metrics.header + Metrics.gap + Metrics.actionContext + Metrics.gap
             height += count == 0 ? Metrics.emptyRow : stack(rows, Metrics.actionRow, gap: 6)
+            if !model.actionChains.isEmpty { height += Metrics.gap + Metrics.chainRow }
             return height + actionResultHeight(model.actionRun.phase) + pad
+        case .handoff:
+            return pad + Metrics.header + Metrics.gap + Metrics.handoffNote + Metrics.gap + Metrics.handoffEditor + Metrics.gap + 26 + pad
         case .timeline:
             return pad + Metrics.header + Metrics.gap
                 + (model.timeline.isEmpty ? Metrics.emptyRow : Metrics.timelineStage + Metrics.gap + 26) + pad

@@ -29,9 +29,12 @@ public enum ClipClassifier {
             #"\bsk-[A-Za-z0-9_-]{20,}\b"#, #"\bxox[abprs]-[A-Za-z0-9-]{10,}\b"#,
             #"\bAKIA[0-9A-Z]{16}\b"#, #"\bAIza[0-9A-Za-z_-]{35}\b"#,
             #"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"#,
-            #"(?i)\b(?:password|passwd|secret|api[_-]?key|token)\s*[:=]\s*\S{6,}"#
+            // `key = value`, `key: value`, and the quoted JSON or YAML form `"key": "value"`.
+            #"(?i)\b(?:password|passwd|secret|api[_-]?key|token)["']?\s*[:=]\s*\S{6,}"#
         ]
         if patterns.contains(where: { trimmed.range(of: $0, options: .regularExpression) != nil }) { return true }
+        // Compact JSON is data, not a key; a token inside it is caught by the patterns above.
+        if JSONFormatter.isDocument(trimmed) { return false }
         // A single long word mixing letters and digits with no spaces (generated passwords, raw keys).
         guard !trimmed.contains(where: \.isWhitespace), (16...256).contains(trimmed.count),
               URL(string: trimmed)?.scheme == nil else { return false }

@@ -1,7 +1,22 @@
 # Context engine
 
+Context reaches NotchFlow as typed, privacy-classified events from observers that run only while a feature
+uses them (`NotchCore/ContextEvents.swift`, `Features/ContextEngine.swift`). Three observers exist:
+
+| Observer | Runs while | Feeds |
+|---|---|---|
+| App in front | Follow the app in front, or Follow what I'm doing (work mode), is on | Ranking (below) and the work mode ([ADR-8](../sixth-sense/01-architecture.md#adr-8--work-modes-change-whats-offered-never-whether-the-notch-opens)) |
+| Clipboard | Suggest from what you copy is on | Suggestions ([Sixth Sense architecture](../sixth-sense/01-architecture.md)) |
+| Finished downloads | Suggest for finished downloads is on | A suggestion in place of the download's notice ([ADR-9](../sixth-sense/01-architecture.md#adr-9--a-finished-download-gets-one-glance-and-a-focus-session-one-summary)) |
+
+`ContextGate` coalesces each source: quick ⌘-Tab cycling settles on the app you stop at, and copying the same
+thing twice in a row counts once. Settings › Diagnostics › Context Inspector shows which sources run, what
+they passed, and what the suggestion engine decided, without content.
+
+## App in front
+
 The app in front changes **which work ranks first**, and nothing else. It never opens, expands or focuses the
-notch. Sources: `Sources/NotchCore/ContextRules.swift`, `AppModel.updateContext`.
+notch. Sources: `Sources/NotchCore/ContextRules.swift`, `AppModel.applyContextBoost`.
 
 ## Rules
 

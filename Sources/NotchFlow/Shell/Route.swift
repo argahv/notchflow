@@ -57,6 +57,52 @@ enum Tool: String, CaseIterable, Identifiable {
     }
 }
 
+/// Where each work mode's shortcuts go (see `WorkMode.shortcuts`).
+extension ModeShortcut {
+    var route: Route {
+        switch self {
+        case .activity: .activity(detail: nil)
+        case .music: .music
+        case .shelf: .shelf
+        case .tools: .tools(nil)
+        case .clipboard: .tools(.clipboard)
+        case .notes: .tools(.notes)
+        case .calendar: .tools(.calendar)
+        case .timer: .tools(.timer)
+        case .sound: .tools(.sound)
+        case .history: .history(detail: nil)
+        }
+    }
+    var title: String {
+        switch self {
+        case .activity: Feature.activity.title
+        case .music: Feature.music.title
+        case .shelf: Feature.shelf.title
+        case .tools: Feature.tools.title
+        case .history: Feature.history.title
+        case .clipboard: Tool.clipboard.title
+        case .notes: Tool.notes.title
+        case .calendar: Tool.calendar.title
+        case .timer: Tool.timer.title
+        case .sound: Tool.sound.title
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .activity: Feature.activity.symbol
+        case .music: Feature.music.symbol
+        case .shelf: Feature.shelf.symbol
+        case .tools: Feature.tools.symbol
+        case .history: Feature.history.symbol
+        case .clipboard: Tool.clipboard.symbol
+        case .notes: Tool.notes.symbol
+        case .calendar: Tool.calendar.symbol
+        case .timer: Tool.timer.symbol
+        case .sound: Tool.sound.symbol
+        }
+    }
+}
+
 /// What a screenshot's surface is doing after its preview: reading its text, or annotating it.
 enum CaptureMode: Hashable { case text, annotate }
 
@@ -75,6 +121,8 @@ enum Route: Hashable {
     case actions
     /// Time Travel: recent finished work and kept content, one moment at a time.
     case timeline
+    /// Agent Rescue: the brief for a failed run (by activity id), to review and copy for an agent.
+    case handoff(String)
 
     static func root(_ feature: Feature) -> Route {
         switch feature {
@@ -92,7 +140,7 @@ enum Route: Hashable {
         case .shelf: .shelf
         case .tools: .tools
         case .history: .history
-        case .command, .capture, .actions, .timeline: nil
+        case .command, .capture, .actions, .timeline, .handoff: nil
         }
     }
     /// Identity of the content view; sub-routes share their feature's view.
@@ -101,6 +149,7 @@ enum Route: Hashable {
         case .capture: "capture"
         case .actions: "actions"
         case .timeline: "timeline"
+        case .handoff: "handoff"
         default: feature?.rawValue ?? "command"
         }
     }
@@ -112,6 +161,7 @@ enum Route: Hashable {
         // What was acted on lives on the shelf; going back lands there.
         case .actions: .shelf
         case .timeline: .history(detail: nil)
+        case .handoff(let id): .activity(detail: id)
         default: nil
         }
     }
@@ -125,6 +175,8 @@ enum GlanceSubject: Equatable {
     case capture(UUID)
     /// Sound moved to another output.
     case sound
+    /// A suggested next step for something the person just did (see `IntentEngine`).
+    case suggestion(UUID)
 }
 
 /// The drawn silhouette. Size, ears and corners animate together in one transaction.

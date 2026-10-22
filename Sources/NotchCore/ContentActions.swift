@@ -22,8 +22,9 @@ public enum ContentAction: String, Codable, Sendable, CaseIterable, Identifiable
     case extractText, removeBackground, convertPNG, convertJPEG, convertHEIC, resizeHalf, compress
     case pdfText, exportPages, splitPages, mergePDFs
     case cleanWhitespace, uppercase, lowercase, titleCase, wordCount, detectLanguage
-    case linkPreview
+    case linkPreview, qrCode
     case mediaInfo, extractFrame, convertM4A, compressVideo
+    case createArchive
     public var id: String { rawValue }
 
     public var title: String {
@@ -52,6 +53,8 @@ public enum ContentAction: String, Codable, Sendable, CaseIterable, Identifiable
         case .wordCount: "Count Words"
         case .detectLanguage: "Detect Language"
         case .linkPreview: "Fetch Title"
+        case .qrCode: "QR Code"
+        case .createArchive: "Create ZIP"
         case .mediaInfo: "Details"
         case .extractFrame: "Save a Frame"
         case .convertM4A: "Convert to M4A"
@@ -62,7 +65,7 @@ public enum ContentAction: String, Codable, Sendable, CaseIterable, Identifiable
     public var effect: ActionEffect {
         switch self {
         case .removeBackground, .convertPNG, .convertJPEG, .convertHEIC, .resizeHalf, .compress,
-             .exportPages, .splitPages, .mergePDFs, .extractFrame, .convertM4A, .compressVideo: .createsFile
+             .exportPages, .splitPages, .mergePDFs, .extractFrame, .convertM4A, .compressVideo, .qrCode, .createArchive: .createsFile
         case .linkPreview: .network
         default: .local
         }
@@ -154,18 +157,20 @@ public enum ActionRegistry {
         case .code:
             return context.sensitive ? [.copy] : [.copy, .detectLanguage, .createNote, .wordCount]
         case .link:
-            return [.open, .copy, .linkPreview]
+            return [.open, .copy, .qrCode, .linkPreview]
         case .audio:
             return [.mediaInfo, .quickLook, .convertM4A, .copy, .reveal]
         case .video:
             return [.extractFrame, .mediaInfo, .quickLook, .compressVideo, .copy, .reveal]
         case .folder:
-            return [.reveal, .open, .copy]
+            return [.reveal, .createArchive, .open, .copy]
         case .file:
-            return [.quickLook, .open, .copy, .reveal]
+            return [.quickLook, .open, .copy, .reveal, .createArchive]
         case .collection:
             let pdfs = !context.members.isEmpty && context.members.allSatisfy { $0 == .pdf }
-            return pdfs && context.members.count > 1 ? [.mergePDFs] : []
+            // Files of any kind can go into one archive; text and links have no file to put in it.
+            let files = !context.members.isEmpty && context.members.allSatisfy { ActionChains.fileKinds.contains($0) }
+            return (pdfs && context.members.count > 1 ? [.mergePDFs] : []) + (files ? [.createArchive] : [])
         }
     }
 
@@ -212,6 +217,11 @@ public struct ActionRun: Equatable, Sendable {
         token += 1
         phase = .processing(action, progress: nil)
         return token
+    }
+    /// A chain moved on to its next step: the same attempt, now running a different action.
+    public mutating func advance(to action: ContentAction, token: Int) {
+        guard token == self.token, isProcessing else { return }
+        phase = .processing(action, progress: nil)
     }
     public mutating func progress(_ value: Double, token: Int) {
         guard token == self.token, case .processing(let action, _) = phase, value.isFinite else { return }
