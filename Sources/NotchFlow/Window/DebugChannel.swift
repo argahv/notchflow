@@ -55,11 +55,32 @@ import AppKit
             // "clip:<text>" or "clip:1password:<text>" (as if copied in a password manager).
             if argument.hasPrefix("1password:") {
                 model.clipboard.consider(String(argument.dropFirst(10)), types: [], app: "com.1password.1password", appName: "1Password")
+            } else if argument.hasPrefix("safari:") {
+                model.clipboard.consider(String(argument.dropFirst(7)), types: [], app: "com.apple.Safari", appName: "Safari")
             } else if argument.hasPrefix("concealed:") {
                 model.clipboard.consider(String(argument.dropFirst(10)), types: ["org.nspasteboard.ConcealedType"], app: nil, appName: nil)
             } else {
                 model.clipboard.consider(argument.replacingOccurrences(of: "\\n", with: "\n"), types: [], app: "com.apple.dt.Xcode", appName: "Xcode")
             }
+        case "suggest":
+            // "suggest:on|off" (copy suggestions), "suggest:run:<index>", "suggest:why", "suggest:dismiss", "suggest:undo",
+            // "suggest:reset" (learning), "suggest:sensitivity:<fewer|balanced|more>".
+            let parts = argument.split(separator: ":").map(String.init)
+            switch parts.first {
+            case "on": model.preferences.suggestionsEnabled = true; model.preferences.clipboardSuggestions = true
+            case "off": model.preferences.clipboardSuggestions = false
+            case "run":
+                if let index = parts.count > 1 ? Int(parts[1]) : 0, let actions = model.suggestion?.actions, actions.indices.contains(index) {
+                    model.runSuggestion(actions[index])
+                }
+            case "why": model.toggleSuggestionWhy()
+            case "dismiss": model.dismissSuggestion()
+            case "undo": model.undoSuggestion()
+            case "reset": model.resetSuggestionLearning()
+            case "sensitivity": if parts.count > 1, let value = SuggestionSensitivity(rawValue: parts[1]) { model.preferences.suggestionSensitivity = value }
+            default: break
+            }
+        case "privacy": model.preferences.privacy = argument == "on"
         case "nowplaying":
             // "nowplaying:<title>|<artist>" or "nowplaying:off"
             let parts = argument.split(separator: "|", maxSplits: 1).map(String.init)
@@ -198,7 +219,15 @@ import AppKit
                    "timeline: \(model.timeline.count) · at \(model.timelineCursor.index): \(model.timelineEntry.map { "\($0.kind.rawValue) \($0.title)" } ?? "-") · actions: \(model.timelineEntry.map { model.timelineActions($0).map(\.title).joined(separator: ",") } ?? "-")",
                    "celebration: \(model.celebration.map { "\($0.title) — \($0.detail) (\($0.batch.count))" } ?? "-")",
                    "annotations: \(model.annotations.items.map(\.tool.rawValue).joined(separator: ",")) · saved: \(model.annotatedCopy?.lastPathComponent ?? "-")",
-                   "mode: \(model.preferences.mode?.title ?? "Custom")"]
+                   "mode: \(model.preferences.mode?.title ?? "Custom")",
+                   "suggestion: \(model.suggestion.map { "\($0.rule) · \($0.title) · \($0.actions.map(\.title).joined(separator: ",")) · score \(String(format: "%.2f", $0.score))" } ?? "-") · pending \(model.pendingSuggestion?.rule ?? "-") · why \(model.suggestionWhy) · result \(model.suggestionResult.map { "\($0.title) — \($0.detail ?? "") undo=\($0.canUndo)" } ?? "-")",
+                   "context sources: " + ContextSource.allCases.map { source in
+                       let state = model.contextEngine.states[source]
+                       return "\(source.rawValue)=\(state?.running == true ? "on" : "off")/\(state?.delivered ?? 0)/\(state?.coalesced ?? 0)"
+                   }.joined(separator: " "),
+                   "inspector: " + model.contextEngine.log.prefix(6).map(\.text).joined(separator: " | "),
+                   "learning: " + model.learnedRules.sorted { $0.key < $1.key }.map { "\($0.key) +\($0.value.accepted) -\($0.value.dismissed) ~\($0.value.ignored)" }.joined(separator: ", "),
+                   "clipboard: history \(model.clipboard.enabled) · items \(model.clipboard.items.count) · skipped \(model.clipboard.skipped)"]
             try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)
         case "dumpHooks":
             let folder = AppFiles.root.appendingPathComponent("debug", isDirectory: true)

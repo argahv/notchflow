@@ -31,6 +31,42 @@ struct SettingsView: View {
                     Text("Agents and builds rank higher in a terminal or editor, downloads in a browser, meetings in a calling app. It never opens the notch by itself.")
                 }
             }
+            Section("Suggestions") {
+                Toggle(isOn: $preferences.suggestionsEnabled) {
+                    Text("Suggest next steps")
+                    Text("At most one suggestion at a time, for something you just did. Rules on this Mac decide: no AI service and no network. It never opens over a drag, a note you're typing or the open workspace.")
+                }
+                Toggle(isOn: $preferences.clipboardSuggestions) {
+                    Text("Suggest from what you copy")
+                    Text("A link, color, JSON, address, date, email address, phone number, file path or long passage can come with one next step. Uses the same filters as clipboard history, and keeps nothing you copied.")
+                }
+                .disabled(!preferences.suggestionsEnabled)
+                Picker("How often", selection: $preferences.suggestionSensitivity) {
+                    ForEach(SuggestionSensitivity.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .disabled(!preferences.suggestionsEnabled)
+                DisclosureGroup("Kinds of suggestion") {
+                    ForEach(SuggestionCategory.allCases) { category in
+                        Toggle(isOn: Binding(get: { !preferences.suggestionCategoriesOff.contains(category) }, set: { on in
+                            if on { preferences.suggestionCategoriesOff.remove(category) } else { preferences.suggestionCategoriesOff.insert(category) }
+                        })) {
+                            Text(category.title)
+                            Text(category.summary)
+                        }
+                    }
+                }
+                Toggle("Quiet hours", isOn: $preferences.quietHoursEnabled)
+                if preferences.quietHoursEnabled {
+                    HStack {
+                        Picker("From", selection: $preferences.quietHoursStart) { ForEach(0..<24, id: \.self) { Text(Self.hour($0)).tag($0) } }
+                        Picker("To", selection: $preferences.quietHoursEnd) { ForEach(0..<24, id: \.self) { Text(Self.hour($0)).tag($0) } }
+                    }
+                }
+                LearningRow(model: model)
+                Text("Quiet mode and Hide private details pause suggestions too. Dismissing one makes that kind wait longer each time; five in a row turn it off until you reset or unmute it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Workspace") {
                 Toggle("Show notch overlay", isOn: $preferences.overlayEnabled)
                 Toggle("Simulate a notch on displays without one", isOn: $preferences.simulatedNotch)
@@ -140,6 +176,19 @@ struct SettingsView: View {
                     Text("1 hour").tag(1); Text("8 hours").tag(8); Text("1 day").tag(24); Text("1 week").tag(168)
                 }
                 .disabled(!preferences.clipboardEnabled)
+                DisclosureGroup("Never read copies from (\(preferences.clipboardExcludedApps.count + ClipboardService.excludedApps.count))") {
+                    Text("Password managers are always left out. Add any app whose copies NotchFlow shouldn't read, for history or suggestions.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(preferences.clipboardExcludedApps, id: \.self) { bundleID in
+                        HStack {
+                            Text(QuickApp(bundleID: bundleID)?.name ?? bundleID)
+                            Spacer()
+                            Button { preferences.clipboardExcludedApps.removeAll { $0 == bundleID } } label: { Image(systemName: "minus.circle") }
+                                .buttonStyle(.borderless).accessibilityLabel("Stop excluding")
+                        }
+                    }
+                    Button("Add App…") { addExcludedApp() }
+                }
                 Toggle(isOn: $preferences.downloadsEnabled) {
                     Text("Download Center")
                     Text("Follows your Downloads folder: in-progress browser downloads with their size so far, then the finished file. macOS asks for access to Downloads the first time.")
@@ -221,6 +270,11 @@ struct SettingsView: View {
                     LabeledContent("Status", value: status.label).foregroundStyle(status.isFailure ? .orange : .secondary)
                 }
             }
+            Section("What NotchFlow observes") {
+                ForEach(PrivacyCatalog.entries) { entry in PrivacyEntryRow(entry: entry) }
+                Text("Only GitHub Actions and Fetch Title use the internet, and only for what you set up or choose. There's no account, no analytics and no telemetry.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Permissions") {
                 permissionRow("Calendar", status: Self.eventKitStatus(.event), pane: "Privacy_Calendars")
                 permissionRow("Reminders", status: Self.eventKitStatus(.reminder), pane: "Privacy_Reminders")
@@ -233,6 +287,7 @@ struct SettingsView: View {
                 LabeledContent("Version", value: Self.version)
                 LabeledContent("Event bridge", value: model.bridge.status)
                 LabeledContent("Stored activities", value: String(model.queue.records.count))
+                ContextInspector(engine: model.contextEngine)
                 Button("Open local data folder") { NSWorkspace.shared.open(AppFiles.root) }
                 Button("Open privacy settings") {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security") { NSWorkspace.shared.open(url) }
@@ -304,6 +359,19 @@ struct SettingsView: View {
         }
         newRepository = ""
     }
+    private func addExcludedApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]; panel.allowsMultipleSelection = true
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls {
+            if let id = Bundle(url: url)?.bundleIdentifier, !preferences.clipboardExcludedApps.contains(id) { preferences.clipboardExcludedApps.append(id) }
+        }
+    }
+    static func hour(_ hour: Int) -> String {
+        let date = Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: Date()) ?? Date()
+        return DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .short)
+    }
     private func addQuickApp() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.application]; panel.allowsMultipleSelection = true
@@ -327,6 +395,93 @@ enum GitHubSettings {
         guard parts.count == 2 else { return nil }
         let candidate = parts.joined(separator: "/")
         return GitHubRuns.isRepository(candidate) ? candidate : nil
+    }
+}
+
+/// What suggestions have learned on this Mac: counts per kind, never content. Reset clears all of it;
+/// a kind muted after repeated dismissals can be brought back on its own.
+private struct LearningRow: View {
+    @ObservedObject var model: AppModel
+    static let names = ["clipboard.link": "Links", "clipboard.color": "Colors", "clipboard.json": "JSON", "clipboard.address": "Addresses",
+                        "clipboard.date": "Dates", "clipboard.email": "Email", "clipboard.phone": "Phone", "clipboard.path": "File paths",
+                        "clipboard.prose": "Long text"]
+    var body: some View {
+        let rules = model.learnedRules
+        let accepted = rules.values.reduce(0) { $0 + $1.accepted }, dismissed = rules.values.reduce(0) { $0 + $1.dismissed }
+        LabeledContent("Learned on this Mac") {
+            HStack {
+                Text(rules.isEmpty ? "Nothing yet" : "Used \(accepted), dismissed \(dismissed)").foregroundStyle(.secondary)
+                Button("Reset Learning") { model.resetSuggestionLearning() }.disabled(rules.isEmpty)
+            }
+        }
+        ForEach(rules.filter { $0.value.consecutiveDismissals >= IntentLearning.muteAfter }.map(\.key).sorted(), id: \.self) { rule in
+            LabeledContent("\(Self.names[rule] ?? rule): muted") {
+                Button("Unmute") { model.unmuteSuggestions(rule) }
+            }
+        }
+    }
+}
+
+/// One capability: what it observes and why, where data goes, the permission, and how to stop and clear it.
+private struct PrivacyEntryRow: View {
+    let entry: PrivacyEntry
+    var body: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 6) {
+                fact("Observes", entry.observes)
+                fact("Why", entry.purpose)
+                fact("Leaves this Mac", entry.leavesMac ?? "Nothing.")
+                fact("Permission", entry.permission?.title ?? "None")
+                fact("Kept", entry.storage)
+                fact("Turn off", entry.turnOff)
+                fact("Clear", entry.clear)
+            }
+            .padding(.vertical, 4)
+        } label: {
+            HStack {
+                Text(entry.title)
+                Spacer()
+                if entry.leavesMac != nil { Image(systemName: "network").foregroundStyle(.secondary).help("Uses the internet") }
+                Text(entry.onByDefault ? "On by default" : "Off until you turn it on").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+    private func fact(_ label: String, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label).font(.caption.weight(.semibold)).foregroundStyle(.secondary).frame(width: 96, alignment: .leading)
+            Text(text).font(.caption).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// Diagnostics: which context sources are running and what they contributed. Shows kinds, counts and
+/// scores, never what was copied.
+private struct ContextInspector: View {
+    @ObservedObject var engine: ContextEngine
+    var body: some View {
+        DisclosureGroup("Context Inspector") {
+            ForEach(ContextSource.allCases) { source in
+                let state = engine.states[source] ?? ContextEngine.SourceState()
+                LabeledContent(source.title) {
+                    Text(state.running ? "Running · \(state.delivered) passed · \(state.coalesced) coalesced" : "Stopped")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if engine.log.isEmpty {
+                Text("Nothing observed yet.").font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(engine.log.prefix(30)) { entry in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(entry.date, style: .time).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                            Text(entry.text).font(.caption)
+                        }
+                        if let detail = entry.detail { Text(detail).font(.caption2).foregroundStyle(.secondary) }
+                    }
+                }
+                Button("Clear Log") { engine.clearLog() }
+            }
+        }
     }
 }
 

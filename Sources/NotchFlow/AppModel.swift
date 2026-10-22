@@ -47,7 +47,14 @@ struct CommandItem: Identifiable {
     /// True while the silhouette is changing shape; the edge catches light, then settles.
     @Published private(set) var surfaceMoving = false
     @Published private(set) var form = SurfaceForm(size: CGSize(width: 208, height: 37.5), ear: 3, corner: 10, inset: 1)
-    @Published private(set) var glance: GlanceSubject = .summary
+    @Published private(set) var glance: GlanceSubject = .summary {
+        didSet {
+            // Something else took the surface from a suggestion (an alert, a screenshot): it was superseded.
+            guard case .suggestion = oldValue, glance != oldValue else { return }
+            if case .suggestion(let id) = glance, id == suggestion?.id { return }
+            suggestionLeftSurface()
+        }
+    }
     @Published private(set) var illumination: Illumination?
     @Published private(set) var dockBadge: Tone?
     @Published private(set) var dropTargeted = false
@@ -102,6 +109,7 @@ struct CommandItem: Identifiable {
     let approvals = AgentApprovals()
     let github = GitHubActionsProvider()
     let clipboard = ClipboardService()
+    let contextEngine = ContextEngine()
     let downloads = DownloadsProvider()
     private(set) lazy var meetings = MeetingProvider(calendar: calendar)
     @Published private(set) var audioOutputs: [AudioOutput] = []
@@ -147,15 +155,20 @@ struct CommandItem: Identifiable {
         clipboard.$items.map(\.count).removeDuplicates().dropFirst()
             .sink { [weak self] _ in DispatchQueue.main.async { if self?.route == .tools(.clipboard) { self?.reflow() } } }
             .store(in: &subscriptions)
-        // Context: the frontmost app reorders the stack. Activation notifications only; no polling.
-        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
-            .compactMap { $0.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication }
-            .sink { [weak self] app in self?.updateContext(app) }
+        // Context: observers start and stop with the features that use them (see ContextEngine). The app in
+        // front reorders the stack; copies can suggest a next step.
+        contextEngine.register(FrontmostAppObserver())
+        contextEngine.register(ClipboardObserver(service: clipboard))
+        contextEngine.onEvent = { [weak self] event in self?.contextEvent(event) }
+        synchronizeContext()
+        Publishers.Merge3(preferences.$contextAware.dropFirst().map { _ in () },
+                          preferences.$suggestionsEnabled.dropFirst().map { _ in () },
+                          preferences.$clipboardSuggestions.dropFirst().map { _ in () })
+            .sink { [weak self] in DispatchQueue.main.async { self?.synchronizeContext() } }
             .store(in: &subscriptions)
-        preferences.$contextAware.dropFirst().sink { [weak self] _ in
-            DispatchQueue.main.async { self?.updateContext(NSWorkspace.shared.frontmostApplication) }
-        }.store(in: &subscriptions)
-        updateContext(NSWorkspace.shared.frontmostApplication)
+        preferences.$clipboardExcludedApps.dropFirst()
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.configureClipboard() } }
+            .store(in: &subscriptions)
         battery.$percent.combineLatest(battery.$charging).scan((Int?.none, Int?.none, false)) { state, next in (state.1, next.0, next.1) }
             .sink { [weak self] previous, current, charging in self?.batteryChanged(from: previous, to: current, charging: charging) }
             .store(in: &subscriptions)
@@ -176,7 +189,11 @@ struct CommandItem: Identifiable {
             .sink { [weak self] enabled, wait in self?.approvals.sync(enabled: enabled, wait: wait) }
             .store(in: &subscriptions)
         preferences.$privacy.dropFirst().sink { [weak self] privateMode in
-            DispatchQueue.main.async { if privateMode { self?.send(.endEditing) }; self?.reflow() }
+            DispatchQueue.main.async {
+                // Hiding details (presenting, sharing a screen) also takes away anything suggested from what was copied.
+                if privateMode { self?.send(.endEditing); self?.pendingSuggestion = nil; self?.closeSuggestion(.superseded) }
+                self?.reflow()
+            }
         }.store(in: &subscriptions)
         preferences.$historyRetentionDays.dropFirst().sink { [weak self] _ in
             DispatchQueue.main.async { self?.applyRetention(); self?.reflow() }
@@ -300,6 +317,8 @@ struct CommandItem: Identifiable {
         case capture(Capture)
         /// Sound moved to another output: the device, its volume, and a quick switch.
         case sound(SoundTransition)
+        /// A suggested next step for something just copied, with its actions.
+        case suggestion(Suggestion)
         /// The most relevant item and how many other activities there are.
         case single(HoverItem, others: Int)
         /// Ambient (music or a timer) on the left, work that matters on the right, one surface.
@@ -318,6 +337,7 @@ struct CommandItem: Identifiable {
         if case .notification(let id) = glance, let record = record(id) { return .notification(record) }
         if case .capture(let id) = glance, let capture, capture.id == id { return .capture(capture) }
         if glance == .sound, let soundTransition { return .sound(soundTransition) }
+        if case .suggestion(let id) = glance, let suggestion, suggestion.id == id { return .suggestion(suggestion) }
         guard let primary = hoverChoice.primary, let item = hoverItem(primary) else { return .quickAccess }
         if let secondary = hoverChoice.secondary, let other = hoverItem(secondary) {
             return primary.family.isAmbient ? .split(ambient: item, work: other, others: hoverChoice.others)
@@ -622,9 +642,11 @@ struct CommandItem: Identifiable {
     private var attentionContext: AttentionContext {
         // A drag on its way in, a drop's result or a screenshot just taken has the surface: passive
         // arrivals wait and light the rim.
+        // A suggestion holds the surface against passive news but not against work that needs the person.
         AttentionContext(editing: interaction.editing || interaction.portal != .closed || captureGlanceShowing || glance == .sound,
                          expanded: interaction.presentation == .expanded,
-                         suppressed: preferences.quietMode || preferences.privacy)
+                         suppressed: preferences.quietMode || preferences.privacy,
+                         holdBelow: SurfaceArbiter.lowestPriorityAdmitted(over: suggestionShowing ? .suggestion : nil))
     }
 
     func send(_ event: InteractionEvent) {
@@ -718,12 +740,13 @@ struct CommandItem: Identifiable {
             if case .notification = glance { glance = .summary; celebration = nil; _ = attention.dismissCurrent(now: Date(), context: attentionContext) }
             if case .capture = glance { glance = .summary; captureWork?.cancel() }
             if glance == .sound { glance = .summary; soundWork?.cancel() }
+            if suggestionShowing { retireSuggestion(.ignored); glance = .summary }
             openedByDrag = false; dropTargeted = false
-            resumeCapture(); resumeAttention()
+            resumeCapture(); resumeAttention(); resumeSuggestion()
         }
-        if was == .expanded && now != .expanded { resumeCapture(); resumeAttention() }
-        if previous.interaction.editing && !interaction.editing { resumeCapture(); resumeAttention() }
-        if previous.interaction.portal != .closed && interaction.portal == .closed { resumeCapture(); resumeAttention() }
+        if was == .expanded && now != .expanded { resumeCapture(); resumeAttention(); resumeSuggestion() }
+        if previous.interaction.editing && !interaction.editing { resumeCapture(); resumeAttention(); resumeSuggestion() }
+        if previous.interaction.portal != .closed && interaction.portal == .closed { resumeCapture(); resumeAttention(); resumeSuggestion() }
         if let feature = route.feature {
             routeMemory[feature] = route
             if feature == .activity && now == .expanded { dockBadge = nil }
@@ -745,6 +768,8 @@ struct CommandItem: Identifiable {
     /// The pointer stayed outside past the grace period.
     func pointerLeft() {
         if case .notification = glance, interaction.presentation == .preview { dismissNotification(); return }
+        // Looked at and left alone: the suggestion goes, and counts as ignored rather than dismissed.
+        if suggestionShowing, interaction.presentation == .preview { closeSuggestion(.ignored); return }
         send(.leave)
     }
 
@@ -1004,10 +1029,9 @@ struct CommandItem: Identifiable {
 
     // MARK: Context
 
-    private func updateContext(_ app: NSRunningApplication?) {
-        // NotchFlow taking focus (typing in a note, the palette) keeps the previous context.
-        if app?.processIdentifier == ProcessInfo.processInfo.processIdentifier { return }
-        let boost = preferences.contextAware ? ContextRules.boost(forFrontmost: app?.bundleIdentifier) : []
+    /// The app in front reorders the stack. The observer already ignores NotchFlow taking focus.
+    private func applyContextBoost() {
+        let boost = preferences.contextAware ? ContextRules.boost(forFrontmost: frontmostApp) : []
         guard boost != contextBoost else { return }
         contextBoost = boost
         if interaction.presentation != .expanded { reflow() }
@@ -1016,8 +1040,9 @@ struct CommandItem: Identifiable {
     // MARK: System
 
     private func configureClipboard() {
-        clipboard.configure(enabled: preferences.clipboardEnabled, retention: Double(max(1, preferences.clipboardRetentionHours)) * 3600,
-                            lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+        clipboard.configure(enabled: preferences.clipboardEnabled, suggestions: contextEngine.isRunning(.clipboard),
+                            retention: Double(max(1, preferences.clipboardRetentionHours)) * 3600,
+                            lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled, excluded: Set(preferences.clipboardExcludedApps))
     }
     func clearClipboard() { clipboard.clear(); reflow() }
 
@@ -1773,6 +1798,240 @@ struct CommandItem: Identifiable {
         catch { message = "Could not save activity history: \(error.localizedDescription)" }
     }
 
+    // MARK: Suggestions
+
+    /// What a suggestion's action left behind, shown in the same glance for a few seconds.
+    struct SuggestionResult: Equatable {
+        let title: String
+        let detail: String?
+        let failed: Bool
+        let canUndo: Bool
+    }
+    @Published private(set) var suggestion: Suggestion?
+    @Published private(set) var suggestionResult: SuggestionResult?
+    /// "Why this suggestion?" is open.
+    @Published private(set) var suggestionWhy = false
+    private var suggestionUndo: (() -> Void)?
+    /// One suggestion waits at most, until the surface is free or it expires; a newer one replaces it.
+    private(set) var pendingSuggestion: Suggestion?
+    private var suggestionWork: DispatchWorkItem?
+    private var intent = IntentEngine(learning: AppModel.storedLearning())
+    private var frontmostApp: String?
+    private lazy var suggestionRunner = SuggestionActionRunner(clipboard: clipboard, shelf: shelf, calendar: calendar,
+                                                              notes: { [weak self] in self?.context }, save: { [weak self] in self?.save() })
+
+    var suggestionShowing: Bool { if case .suggestion = glance { return true }; return false }
+    /// Per-rule counts, for Settings.
+    var learnedRules: [String: RuleStats] { intent.learning.rules }
+
+    /// Starts and stops observers to match what's turned on. Nothing is observed for a feature that's off.
+    private func synchronizeContext() {
+        let suggesting = preferences.suggestionsEnabled && preferences.clipboardSuggestions
+        contextEngine.setEnabled(.frontmostApp, preferences.contextAware)
+        contextEngine.setEnabled(.clipboard, suggesting)
+        configureClipboard()
+        if !contextEngine.isRunning(.frontmostApp) { frontmostApp = nil }
+        applyContextBoost()
+        if !suggesting { pendingSuggestion = nil; closeSuggestion(.superseded) }
+    }
+
+    private func contextEvent(_ event: ContextEvent) {
+        switch event.signal {
+        case .frontmostApp(let bundleID, _):
+            frontmostApp = bundleID
+            applyContextBoost()
+        case .clipboard:
+            let decision = intent.evaluate(event, in: intentSituation)
+            contextEngine.record(decision)
+            if case .suggest(let suggestion) = decision { offer(suggestion) }
+        }
+    }
+
+    private var intentSituation: IntentSituation {
+        IntentSituation(enabled: preferences.suggestionsEnabled, sensitivity: preferences.suggestionSensitivity,
+                        disabledCategories: preferences.suggestionCategoriesOff, quiet: preferences.quietMode, privateMode: preferences.privacy,
+                        quietHours: preferences.quietHoursEnabled ? QuietHours(start: preferences.quietHoursStart, end: preferences.quietHoursEnd) : nil)
+    }
+
+    /// Who has the surface, in `SurfaceArbiter`'s terms.
+    private var surfaceOccupancy: SurfaceOccupancy {
+        let interacting = interaction.dragging || interaction.editing || interaction.portal != .closed
+            || interaction.presentation == .expanded || windows?.pointerInside == true
+        let showing: SurfaceTier? = switch glance {
+        case .summary: nil
+        case .notification(let id): record(id).map { AttentionPriority(state: $0.event.lifecycle).surfaceTier } ?? .passive
+        case .capture, .suggestion: .suggestion
+        case .sound: .passive
+        }
+        return SurfaceOccupancy(interacting: interacting, showing: showing)
+    }
+
+    private func offer(_ suggestion: Suggestion) {
+        // A newer copy replaces the suggestion on screen in place; the older one was superseded, not dismissed.
+        if suggestionShowing, let current = self.suggestion {
+            if suggestionResult == nil { resolve(current, .superseded) }
+            showSuggestion(suggestion)
+            return
+        }
+        switch SurfaceArbiter.admit(.suggestion, into: surfaceOccupancy) {
+        case .show: showSuggestion(suggestion)
+        case .wait: pendingSuggestion = suggestion
+        }
+    }
+
+    private func showSuggestion(_ suggestion: Suggestion) {
+        pendingSuggestion = nil
+        suggestionWork?.cancel()
+        intent.presented(suggestion, at: Date())
+        var next = snapshot
+        if next.interaction.presentation == .collapsed { next.interaction.send(.attention) }
+        // Set before the glance changes, so replacing one suggestion with another isn't read as being superseded.
+        commit(next, also: {
+            self.suggestion = suggestion; self.suggestionResult = nil; self.suggestionUndo = nil; self.suggestionWhy = false
+            self.glance = .suggestion(suggestion.id)
+        })
+        illuminate(.silver)
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
+                             userInfo: [.announcement: "\(suggestion.title). Suggested: \(suggestion.actions.first?.title ?? "")",
+                                        .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+        scheduleSuggestionClose(after: 7)
+    }
+
+    /// A suggestion that had to wait is shown when the surface is free, if it's still fresh. Work that needs
+    /// the person goes first.
+    private func resumeSuggestion() {
+        guard pendingSuggestion != nil else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self, let pending = self.pendingSuggestion, self.glance == .summary else { return }
+            // Quiet or private since it was queued, or too old to still be relevant: it goes.
+            guard pending.expires > Date(), !self.preferences.quietMode, !self.preferences.privacy else { self.pendingSuggestion = nil; return }
+            if self.attention.pending.contains(where: { $0.priority >= .actionRequired }) { return }
+            if SurfaceArbiter.admit(.suggestion, into: self.surfaceOccupancy) == .show { self.showSuggestion(pending) }
+        }
+    }
+
+    /// The glance leaves on its own after a while, but never from under the pointer.
+    private func scheduleSuggestionClose(after delay: TimeInterval) {
+        suggestionWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.suggestionShowing else { return }
+            if self.windows?.pointerInside == true { self.scheduleSuggestionClose(after: 2); return }
+            self.closeSuggestion(.ignored)
+        }
+        suggestionWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func dismissSuggestion() { closeSuggestion(.dismissed) }
+
+    /// Closes the glance. What happened is learned only if no action was chosen yet; nil means it already was.
+    private func closeSuggestion(_ outcome: SuggestionOutcome?) {
+        suggestionWork?.cancel()
+        guard suggestionShowing else { return }
+        var next = snapshot
+        if next.interaction.presentation == .preview, windows?.pointerInside != true { next.interaction.send(.leave) }
+        commit(next, also: { self.retireSuggestion(outcome); self.glance = .summary })
+        resumeAttention()
+    }
+
+    /// Records the outcome and clears the suggestion, without touching the surface.
+    private func retireSuggestion(_ outcome: SuggestionOutcome?) {
+        if let outcome, let suggestion, suggestionResult == nil { resolve(suggestion, outcome) }
+        suggestion = nil; suggestionResult = nil; suggestionUndo = nil; suggestionWhy = false
+    }
+
+    /// Something else took the glance (see `glance`).
+    private func suggestionLeftSurface() {
+        suggestionWork?.cancel()
+        retireSuggestion(.superseded)
+    }
+
+    private func resolve(_ suggestion: Suggestion, _ outcome: SuggestionOutcome) {
+        intent.resolve(suggestion, outcome, at: Date())
+        contextEngine.record(outcome, for: suggestion)
+        if outcome != .superseded { persistLearning() }
+    }
+
+    func toggleSuggestionWhy() {
+        guard suggestionShowing, suggestionResult == nil else { return }
+        commit(snapshot, also: { self.suggestionWhy.toggle() })
+        scheduleSuggestionClose(after: 10)
+    }
+
+    /// Runs one of the suggestion's actions, after `ActionGuard` clears it. A missing permission is asked
+    /// for here, in context, and the action continues once it's granted.
+    func runSuggestion(_ action: SuggestedAction) {
+        guard let suggestion, suggestion.actions.contains(action), suggestionResult == nil else { return }
+        switch ActionGuard.clearance(for: ActionCatalog.descriptor(for: action), granted: grantedActionPermissions, confirmed: false) {
+        case .needsPermission(let missing):
+            suggestionWork?.cancel()
+            requestPermissions(missing) { [weak self] granted in
+                guard let self, self.suggestion?.id == suggestion.id else { return }
+                if granted { self.runSuggestion(action); return }
+                let names = missing.map(\.title).sorted().joined(separator: ", ")
+                self.showSuggestionResult(.failed("NotchFlow needs access to \(names). Allow it in System Settings › Privacy & Security."))
+            }
+            return
+        case .needsConfirmation:
+            // No suggested action needs it today. One that ever does is refused rather than run unasked.
+            showSuggestionResult(.failed("That needs a confirmation the notch can't ask for yet."))
+            return
+        case .run:
+            break
+        }
+        resolve(suggestion, .accepted)
+        showSuggestionResult(suggestionRunner.run(action))
+    }
+
+    private func showSuggestionResult(_ result: SuggestionActionRunner.Result) {
+        switch result {
+        case .handedOff:
+            // Another app has it now; the acceptance was already recorded.
+            illuminate(.green)
+            closeSuggestion(nil)
+        case .done(let title, let detail, let undo):
+            illuminate(.green)
+            suggestionUndo = undo
+            commit(snapshot, also: { self.suggestionWhy = false
+                self.suggestionResult = SuggestionResult(title: title, detail: detail, failed: false, canUndo: undo != nil) })
+            scheduleSuggestionClose(after: undo == nil ? 2.5 : 5)
+        case .failed(let message):
+            commit(snapshot, also: { self.suggestionWhy = false
+                self.suggestionResult = SuggestionResult(title: "Couldn't do that", detail: message, failed: true, canUndo: false) })
+            scheduleSuggestionClose(after: 6)
+        }
+    }
+
+    func undoSuggestion() {
+        guard let undo = suggestionUndo else { return }
+        suggestionUndo = nil
+        undo()
+        commit(snapshot, also: { self.suggestionResult = SuggestionResult(title: "Undone", detail: nil, failed: false, canUndo: false) })
+        scheduleSuggestionClose(after: 1.6)
+    }
+
+    private var grantedActionPermissions: Set<ActionPermission> {
+        calendar.remindersAllowed ? [.reminders] : []
+    }
+
+    /// Only Reminders is asked for from a suggestion; other permissions are asked where their feature lives.
+    private func requestPermissions(_ missing: Set<ActionPermission>, then completion: @escaping (Bool) -> Void) {
+        guard missing == [.reminders] else { completion(false); return }
+        calendar.connectReminders(then: completion)
+    }
+
+    func resetSuggestionLearning() { intent.reset(); persistLearning(); objectWillChange.send() }
+    func unmuteSuggestions(_ rule: String) { intent.learning.unmute(rule); persistLearning(); objectWillChange.send() }
+
+    private nonisolated static func storedLearning() -> IntentLearning {
+        guard let data = UserDefaults.standard.data(forKey: "intentLearning"),
+              let learning = try? JSONDecoder().decode(IntentLearning.self, from: data) else { return IntentLearning() }
+        return learning
+    }
+    private func persistLearning() {
+        UserDefaults.standard.set(try? JSONEncoder().encode(intent.learning), forKey: "intentLearning")
+    }
+
     // MARK: Commands (⌘K)
 
     var commandResults: [CommandItem] {
@@ -1799,6 +2058,12 @@ struct CommandItem: Identifiable {
         }
         items.append(CommandItem(id: "quiet", title: preferences.quietMode ? "Turn off quiet mode" : "Turn on quiet mode", symbol: "bell.slash") { [weak self] in self?.preferences.quietMode.toggle() })
         items.append(CommandItem(id: "privacy", title: preferences.privacy ? "Show private details" : "Hide private details", symbol: "eye.slash") { [weak self] in self?.preferences.privacy.toggle() })
+        let suggesting = preferences.suggestionsEnabled && preferences.clipboardSuggestions
+        items.append(CommandItem(id: "suggestions", title: suggesting ? "Turn off copy suggestions" : "Turn on copy suggestions",
+                                 symbol: "sparkles", hint: "Suggestions") { [weak self] in
+            guard let preferences = self?.preferences else { return }
+            if suggesting { preferences.clipboardSuggestions = false } else { preferences.suggestionsEnabled = true; preferences.clipboardSuggestions = true }
+        })
         items.append(CommandItem(id: "settings", title: "Settings…", symbol: "gearshape", hint: "⌘,") { NotificationCenter.default.post(name: .openNotchFlowSettings, object: nil) })
         let query = commandQuery.trimmingCharacters(in: .whitespaces).lowercased()
         guard !query.isEmpty else { return items }
@@ -1824,7 +2089,7 @@ struct CommandItem: Identifiable {
     }
 
     func stop() {
-        clock.run(false); providers.stopAll(); approvals.withdraw(); screenshots.stop(); recognition?.cancel(); sound.stop()
+        clock.run(false); providers.stopAll(); contextEngine.stopAll(); approvals.withdraw(); screenshots.stop(); recognition?.cancel(); sound.stop()
         media.stop(); camera.stop(); backdrop.stop(); battery.stop()
     }
 }

@@ -329,6 +329,12 @@ public struct IntentEngine: Sendable {
         learning.record(outcome, rule: suggestion.rule, at: date)
     }
 
+    /// Starts over: forgets what was learned and what was suggested recently.
+    public mutating func reset() {
+        learning.reset()
+        session = IntentSession()
+    }
+
     private func learningNote(_ rule: String, _ adjustment: Double) -> String? {
         let stats = learning.stats(rule)
         if adjustment > 0, stats.accepted > 0 { return "You've used \(stats.accepted) like it before." }

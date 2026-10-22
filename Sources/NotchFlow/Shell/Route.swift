@@ -125,6 +125,8 @@ enum GlanceSubject: Equatable {
     case capture(UUID)
     /// Sound moved to another output.
     case sound
+    /// A suggested next step for something the person just did (see `IntentEngine`).
+    case suggestion(UUID)
 }
 
 /// The drawn silhouette. Size, ears and corners animate together in one transaction.

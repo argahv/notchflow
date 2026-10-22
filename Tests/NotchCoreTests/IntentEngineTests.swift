@@ -186,6 +186,24 @@ final class IntentEngineTests: XCTestCase {
         XCTAssertNotNil(suggestion(engine.evaluate(copy("#ABCDEF", 3700), in: more)), "An hour later the limit has passed")
     }
 
+    func testResettingForgetsLearningAndRecentPromptsAlike() {
+        var engine = IntentEngine()
+        engine.ruleRepeat = 0
+        var more = situation; more.sensitivity = .more
+        var shown: [Suggestion] = []
+        for index in 0..<6 {
+            guard let next = suggestion(engine.evaluate(copy(String(format: "#%06X", index), Double(index)), in: more)) else { return }
+            engine.presented(next, at: t0.addingTimeInterval(Double(index)))
+            shown.append(next)
+        }
+        for next in shown { engine.resolve(next, .dismissed, at: t0.addingTimeInterval(6)) }
+        XCTAssertTrue(engine.learning.isMuted("clipboard.color"))
+        engine.reset()
+        XCTAssertTrue(engine.learning.rules.isEmpty)
+        let fresh = suggestion(engine.evaluate(copy("#000000", 10), in: situation))
+        XCTAssertEqual(fresh?.score ?? 0, 0.75, accuracy: 0.0001, "No penalty for earlier prompts, and the same color can be suggested again")
+    }
+
     func testSensitivityDecidesWhichSuggestionsClearTheBar() {
         var engine = IntentEngine()
         var fewer = situation; fewer.sensitivity = .fewer

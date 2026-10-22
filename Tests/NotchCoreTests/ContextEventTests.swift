@@ -149,6 +149,12 @@ final class ClipEntityTests: XCTestCase {
         XCTAssertFalse(JSONFormatter.isDocument("42"))
     }
 
+    func testCompactJSONIsDataNotASecretUnlessItCarriesAKey() {
+        XCTAssertFalse(ClipClassifier.looksSecret(#"{"name":"notchflow","tags":["notch","mac"],"stars":42}"#))
+        XCTAssertTrue(ClipClassifier.looksSecret(#"{"token":"ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234"}"#))
+        XCTAssertTrue(ClipClassifier.looksSecret(#"{"api_key": "f8Kq2LzP9xWv"}"#))
+    }
+
     func testLinkCleaningRemovesTrackersOnly() {
         let tracked = URL(string: "https://example.com/a?utm_source=x&id=7&fbclid=y#top")!
         XCTAssertEqual(LinkCleaner.clean(tracked)?.absoluteString, "https://example.com/a?id=7#top")

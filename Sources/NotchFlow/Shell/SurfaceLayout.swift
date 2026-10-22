@@ -62,6 +62,11 @@ enum Metrics {
     static let timelineStage = 82.0
     /// Sound Island's glance.
     static let soundGlance = 76.0
+    /// A suggestion: 11 pt above and below a 44 pt row; "Why?" adds a gap and two lines of reason.
+    static let suggestionGlance = 66.0
+    static let suggestionWhy = 38.0
+    /// Room for the text beside two action pills, "Why?" and dismiss.
+    static let suggestionWing = 176.0
     /// A one-time discovery tip under the quick-access shortcuts.
     static let hintRow = 18.0
     static let historyRow = 44.0
@@ -148,6 +153,11 @@ enum Metrics {
             case .capture:
                 return resolve(.content(width: display.notchWidth + 2 * Metrics.splitWing, height: Metrics.captureGlance),
                                wing: Metrics.splitWing, ear: 12, corner: 24)
+            case .suggestion:
+                // Opening "Why?" deepens the same shape rather than adding a panel.
+                let why = model.suggestionWhy && model.suggestionResult == nil ? Metrics.suggestionWhy : 0
+                return resolve(.content(width: display.notchWidth + 2 * Metrics.suggestionWing, height: Metrics.suggestionGlance + why),
+                               wing: Metrics.suggestionWing, ear: 10, corner: 22)
             default:
                 let depth = Double(model.glanceStackDepth)
                 return resolve(.content(width: display.notchWidth + 2 * Metrics.glanceWing,

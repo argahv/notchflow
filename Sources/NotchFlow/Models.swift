@@ -98,12 +98,27 @@ struct QuickApp: Identifiable, Equatable {
     /// NotchFlow's own motion reduced to short fades, without changing the system setting. Same switch
     /// the Reduce Motion path already reads.
     @Published var calmMotion: Bool { didSet { save("NotchFlowReduceMotion", calmMotion) } }
+    /// The global switch for predicted next steps. On by default, but nothing is observed for them
+    /// until a source such as `clipboardSuggestions` is turned on too.
+    @Published var suggestionsEnabled: Bool { didSet { save("suggestionsEnabled", suggestionsEnabled) } }
+    /// Off by default: suggestions from what you copy. Reads the same filtered copies as clipboard history.
+    @Published var clipboardSuggestions: Bool { didSet { save("clipboardSuggestions", clipboardSuggestions) } }
+    @Published var suggestionSensitivity: SuggestionSensitivity { didSet { save("suggestionSensitivity", suggestionSensitivity.rawValue) } }
+    @Published var suggestionCategoriesOff: Set<SuggestionCategory> {
+        didSet { save("suggestionCategoriesOff", suggestionCategoriesOff.map(\.rawValue).sorted()) }
+    }
+    @Published var quietHoursEnabled: Bool { didSet { save("quietHoursEnabled", quietHoursEnabled) } }
+    @Published var quietHoursStart: Int { didSet { save("quietHoursStart", quietHoursStart) } }
+    @Published var quietHoursEnd: Int { didSet { save("quietHoursEnd", quietHoursEnd) } }
+    /// Bundle identifiers whose copies are never read, on top of the built-in password managers.
+    @Published var clipboardExcludedApps: [String] { didSet { save("clipboardExcludedApps", clipboardExcludedApps) } }
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         defaults.register(defaults: ["overlayEnabled": true, "simulatedNotch": true, "portalEnabled": true, "soundIslandEnabled": true,
                                     "bridgeEnabled": true, "notchWidth": 190.0, "hoverDelay": 0.12,
                                     "showBattery": false, "historyRetentionDays": 30, "approvalWait": 25, "clipboardRetentionHours": 24, "contextAware": true,
+                                    "suggestionsEnabled": true, "quietHoursStart": 22, "quietHoursEnd": 8,
                                     "quickApps": ["com.apple.Terminal", "com.microsoft.VSCode", "com.apple.finder", "com.apple.Safari", "com.apple.Notes"]])
         overlayEnabled = defaults.bool(forKey: "overlayEnabled")
         simulatedNotch = defaults.bool(forKey: "simulatedNotch")
@@ -135,6 +150,14 @@ struct QuickApp: Identifiable, Equatable {
         soundIslandEnabled = defaults.bool(forKey: "soundIslandEnabled")
         portalHintSeen = defaults.bool(forKey: "portalHintSeen")
         calmMotion = defaults.bool(forKey: "NotchFlowReduceMotion")
+        suggestionsEnabled = defaults.bool(forKey: "suggestionsEnabled")
+        clipboardSuggestions = defaults.bool(forKey: "clipboardSuggestions")
+        suggestionSensitivity = SuggestionSensitivity(rawValue: defaults.string(forKey: "suggestionSensitivity") ?? "") ?? .balanced
+        suggestionCategoriesOff = Set((defaults.stringArray(forKey: "suggestionCategoriesOff") ?? []).compactMap(SuggestionCategory.init(rawValue:)))
+        quietHoursEnabled = defaults.bool(forKey: "quietHoursEnabled")
+        quietHoursStart = defaults.integer(forKey: "quietHoursStart")
+        quietHoursEnd = defaults.integer(forKey: "quietHoursEnd")
+        clipboardExcludedApps = defaults.stringArray(forKey: "clipboardExcludedApps") ?? []
     }
 
     var modeSettings: ModeSettings {
