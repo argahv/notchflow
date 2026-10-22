@@ -42,7 +42,11 @@ import AppKit
         case "hover": if argument == "enter" { model.hoverBegan() } else { model.pointerLeft() }
         case "note": if argument == "new" { model.newNote() } else { model.closeNote() }
         case "detail": model.toggleDetail(argument)
-        case "notification": if argument == "view" { model.viewNotificationDetails() } else { model.dismissNotification() }
+        case "notification":
+            // "notification:view", "notification:primary" (its own button: Review, Join, Show…), anything else dismisses.
+            if argument == "view" { model.viewNotificationDetails() }
+            else if argument == "primary", case .notification(let record) = model.glanceLead { model.notificationAction(record).perform() }
+            else { model.dismissNotification() }
         case "query": model.commandQuery = argument
         case "timer": if let minutes = Int(argument) { model.startTimer(minutes: minutes) } else { model.cancelTimer() }
         case "media": model.preferences.mediaEnabled = argument == "on"
