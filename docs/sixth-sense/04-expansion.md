@@ -43,7 +43,7 @@ Status: **Shipped** (in release 0.2) · **Built** (on these branches, tested, no
 | **QR Bridge** (2.0) | QR Code action for links; offered for a copied link | **Built** | `ActionExecutor.qrCode`, `IntentRules` | — | New, done |
 | **Color Sense** (2.0) | Swatch, hex/RGB/HSL conversions | Built (before 2.0) | `ColorValue` | Palette, recent colors | Partial |
 | **Unified Command Bar** (2.0) | ⌘K: commands, activities, now shelf items and clipboard | Partial | `AppModel.commandResults` | Workflows, workspaces, settings | Extended |
-| **Agent Rescue** (2.0) | Failures notify with Open run; agents' requests answered | Partial | `GitHubProvider`, `AgentApprovals` | A reviewable handoff brief | Planned (next) |
+| **Agent Rescue** (2.0) | A failed run, build, deploy or agent turn offers Handoff: an editable brief, copied for an agent, nothing sent | **Built** | `AgentRescue`, `HandoffSurface` | Local build output, when a tool reports it safely | New, done |
 | **Smart Cleanup** (2.0) | Nothing | Planned | `ShelfService`, `ActionGuard` (destructive → confirm) | Review-first, move to Trash | Deferred |
 | **Presentation Mode** (2.0) | Hide private details hides previews and suggestions | Partial | `Preferences.privacy` | Name, shortcut, meeting reminder | Planned |
 | **Notch Companions** (2.0) | Nothing | Experiment | — | — | Deferred |
@@ -69,7 +69,7 @@ Each is independent of the others and has a clear contract.
 | WebP output | Smaller web images | `ActionExecutor.image` | New `ContentAction`, `createsFile`, only if `CGImageDestinationCopyTypeIdentifiers` lists WebP | Unit test for the registry; real file written in QA |
 | Color palette | Keep and reuse colors | `ClipEntities.ColorValue`, a new shelf kind | Memory or SwiftData, clearable, listed in `PrivacyCatalog` | Settings entry and tests |
 | Context detectors | More signals for work modes | `ModeRules` | Signals NotchFlow already has; a `ModeDetector` switch each | `WorkModeTests` |
-| Agent Rescue brief | Turn a failed run into a reviewable handoff | `GitHubProvider` records | Text the person reviews and copies; nothing sent | Unit test for the brief; no network |
+| Agent Rescue sources | More failures worth a brief (a failed test step's name, a local build's error count) | `AgentRescue.brief`, the inbox contract | Only fields a tool already reports; nothing fetched; secrets left out | `AgentRescueTests` |
 | Accessibility | VoiceOver and keyboard for glances | `SuggestionGlance`, `ActionsSurface` | No layout changes to size contracts | A VoiceOver pass recorded |
 
 These aren't "good first issues": each touches a shared contract and needs the tests named.

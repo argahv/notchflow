@@ -94,7 +94,8 @@ collisions are in [04-expansion.md](04-expansion.md).
 | A | Shared artifact and action contract, workflow execution, Next Action, Live Activity reporting | **Done** (ADR-10) |
 | B | Action Chains (four presets), Magic Drop batch workflows, QR Bridge, Create ZIP, ⌘K over shelf and clipboard | **Done** |
 | B | Color Sense palette, Memory Shelf OCR search | Planned |
-| C | Agent Rescue (a reviewable handoff brief for a failed run), Presentation Mode (named, with a shortcut), Intent Switch 2.0 (secondary activity alongside the mode) | Planned, next |
+| C | Agent Rescue: a reviewable handoff brief for a failed run, copied for an agent, nothing sent | **Done** |
+| C | Presentation Mode (named, with a shortcut), Intent Switch 2.0 (secondary activity alongside the mode) | Planned, next |
 | C | Workspace Time Machine | Planned; needs Accessibility for window frames, asked only when turned on |
 | D | Pocket-to-Notch, Smart Cleanup, saved chains (Teach My Mac), extension SDK, voice | Planned |
 | E | Notch Companions, workspace previews | Experiments, not scheduled |
@@ -128,4 +129,4 @@ Ordered by priority. Each item lists what it builds on and the platform reality.
    that ignores the real pointer during scripted runs.
 8. Documentation for 7.
 9. On `feature/sixth-sense-expansion`: the chain and Next Action core; then Action Chains, Next Action, QR Code,
-   Create ZIP and ⌘K search in the app; then this documentation.
+   Create ZIP and ⌘K search in the app; then this documentation; then Agent Rescue and its documentation.

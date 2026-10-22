@@ -7,7 +7,7 @@ Run on 2026-10-22, macOS 27.0 (26A428), Xcode 27.1 (27A9275), Swift 6.4 toolchai
 
 | Check | Command | Result |
 |---|---|---|
-| NotchCore unit tests | `swift test` | **190 passed**, 0 failed (110 before this branch, 80 new) |
+| NotchCore unit tests | `swift test` | **194 passed**, 0 failed (110 before this branch, 84 new) |
 | Bridge and hook tests | `python3 -I Tests/test_bridge.py` | 24 passed |
 | Generated project is current | `python3 Scripts/generate_project.py && git diff --exit-code NotchFlow.xcodeproj` | Clean |
 | Debug build | `xcodebuild … -configuration Debug build` | Succeeded; no new warnings in changed files |
@@ -82,6 +82,11 @@ there, as they do for the existing capture glance.
   made in between are gone, the originals are byte for byte unchanged, and the chain is a completed task in
   History. The Next Action then offers Create ZIP, which makes one archive holding both results. A copied link
   offers QR Code, which makes a PNG on the shelf and offers Copy next. ⌘K finds it.
+
+- Agent Rescue: a failed CI run's glance offers Handoff beside Open run; Handoff opens the editable brief in the
+  workspace, naming the failure; a failed download isn't offered one. Copy for Agent was then run for real
+  (clipboard backed up and restored): the clipboard held exactly the brief shown, with the repository, branch,
+  run link and summary, and the request to propose a fix without pushing.
 
 ### Real-path checks
 
