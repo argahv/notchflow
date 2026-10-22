@@ -25,7 +25,8 @@ directly. NotchFlow doesn't claim to defend against that.
 | Clipboard history | Memory only | Retention setting (1 h–1 week), 40 items, gone on quit | Off by default |
 | Copy suggestions | Memory only | The copy is held while its suggestion waits (≤ 45 s) or shows | Off by default; same filters as history; content-derived dedupe keys are in-memory hashes, dropped after 10 min |
 | Suggestion learning | `UserDefaults` key `intentLearning` | Until Settings › Suggestions › Reset Learning | Per kind of suggestion: accepted, dismissed, ignored, current dismissal streak, last dismissal time. No content, no app names |
-| Context Inspector log | Memory only | Last 80 lines | Source names, lengths, kinds of suggestion and scores; never what was copied |
+| Context Inspector log | Memory only | Last 80 lines | Source names, lengths, kinds of suggestion and scores; never what was copied or a downloaded file's name |
+| Focus session ledger | Memory only | Until the session ends | Ids and titles of what waited; only the summary sentence is kept, as the session's History record |
 | Excluded clipboard apps | `UserDefaults` | Until removed | Bundle identifiers |
 | GitHub token | Login Keychain, this device only | Until removed | Sent only to `api.github.com`; never logged or shown again |
 | Preferences | `UserDefaults` | — | Repositories you follow; no secrets |

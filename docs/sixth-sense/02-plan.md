@@ -27,10 +27,10 @@ reusable pieces, risks, and the measured baseline.
 
 | Item | Where | Status |
 |---|---|---|
-| Typed, privacy-classified context events | `NotchCore/ContextEvents.swift` | Done: two sources (app in front, clipboard), three privacy classes |
+| Typed, privacy-classified context events | `NotchCore/ContextEvents.swift` | Done: three sources (app in front, clipboard, finished downloads), three privacy classes |
 | Coalescing, dedupe, debounce | `ContextGate` | Done, 8 tests |
 | Observers with a lifecycle, stopped when unused | `Features/ContextEngine.swift` | Done: each runs only while a feature consumes it |
-| Rules-first intent engine with explainable scores | `NotchCore/IntentEngine.swift` | Done: 9 rules, 11 hold reasons, 17 tests |
+| Rules-first intent engine with explainable scores | `NotchCore/IntentEngine.swift` | Done: 13 rules (9 for copies, 4 for downloads), 12 hold reasons, tested in `IntentEngineTests` and `FlowGuardianTests` |
 | Cooldowns, dedupe, dismissal backoff, hourly cap, quiet hours, sensitivity, per-kind switches, global switch | same | Done |
 | Minimal, resettable local learning | `IntentLearning` | Done: counts per rule only; Reset and Unmute in Settings |
 | Action declarations and one capability check | `NotchCore/ActionCatalog.swift` | Done for all 31 Notch Actions and 10 suggested actions; both runners pass `ActionGuard` |
@@ -57,6 +57,7 @@ Phase 1 acceptance criteria from the brief:
 | Magic Drop | Already shipped (portal, shelf, Notch Actions). Unchanged except that Notch Actions now pass `ActionGuard`. |
 | Smart clipboard classification | Done: link, email, phone, color (hex, rgb, rgba), JSON, address, date, file path, code, prose. |
 | Contextual suggestions from copies | Done end to end, with actions, Why?, Undo and learning. |
+| Contextual suggestions for finished downloads | Done: an archive offers Extract, a PDF Extract Text and its actions, an image, video or audio file its actions, in place of the download's notice (ADR-9). |
 | User-excluded clipboard apps | Done (Settings), on top of the built-in password-manager list. |
 | Secret filter fixes | Compact JSON is no longer mistaken for a key; quoted JSON keys (`"api_key": "…"`) are now caught. |
 | Universal task progress | Already shipped (activity engine). |
@@ -75,14 +76,20 @@ Phase 1 acceptance criteria from the brief:
 | Developer context | Partly: Developer mode from editors and terminals; agents, builds and CI rank first. Git status and build output need the inbox contract to carry them. |
 | Workspace snapshots and restore | Not started (P2 below). |
 
+## Phase 4: the Sixth Sense · Started
+
+| Item | Status |
+|---|---|
+| Flow Guardian | **Done** for NotchFlow's own previews: during a focus timer only needs-input and failures come through, the rest waits and is counted, and the end says what waited with Review (ADR-9). Reading or holding other apps' notifications, or macOS Focus, isn't possible with public APIs. |
+| Predictive ranking improvements | Partly: per-rule learning, work-mode tilt and finished downloads. More sources are below. |
+| Voice, Teach My Mac, companion | Not started (below). |
+
 ## Phase 3–5: roadmap
 
 Ordered by priority. Each item lists what it builds on and the platform reality.
 
 | Priority | Item | Builds on | Notes and limits |
 |---|---|---|---|
-| P1 | More suggestion rules from existing sources: an archive download → Extract; a finished download → Keep on Shelf | Intent engine; Download Center events become context events | Must replace, not duplicate, the download glance's own button. |
-| P1 | Flow Guardian summary: "Focus session completed · 48 min · 3 updates deferred" | Focus timer, `AttentionCenter.pending` | No public API reads macOS Focus without an entitlement; this would cover NotchFlow's own deferrals only. |
 | P1 | A Study session that starts the focus timer and quiets everything but its own kinds | Work modes, focus timer | Study is chosen, never inferred. |
 | P2 | Workspace snapshots and restore | New observer; Accessibility for window frames; per-browser Automation for URLs | Must report what couldn't be restored. Accessibility is a large permission; ask only when the feature is turned on. |
 | P2 | Teach My Mac workflows | `ActionCatalog` descriptors as steps, context events as triggers, `ActionGuard` for each step | No shell or AI-generated commands; previews and history per run. |
@@ -102,3 +109,6 @@ Ordered by priority. Each item lists what it builds on and the platform reality.
    resume path, and the stuck-alert fix.
 5. `Intent Switch`: work modes, their effects, Settings, ⌘K, privacy entry, QA hooks.
 6. Documentation for 4 and 5.
+7. `Suggest a next step for finished downloads, and say what waited during a focus session`, plus a Debug switch
+   that ignores the real pointer during scripted runs.
+8. Documentation for 7.

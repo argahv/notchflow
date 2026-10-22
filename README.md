@@ -169,6 +169,8 @@ Suggest from what you copy**, and a copy with an obvious next step grows out of 
 | An email address or phone number | New Email, Call |
 | A path to something on your Mac | Show in Finder, Open |
 | A long passage | Keep on Shelf, where Notch Actions can do more, or New Note |
+| *A finished download:* an archive | Extract (Archive Utility, the archive is kept), Show in Finder |
+| *A finished download:* a PDF, image, video or audio file | Extract Text or its other actions, kept on the shelf by reference |
 
 - **Rules on your Mac decide.** No AI service, no network, and nothing you copied is kept. Password
   managers, apps you exclude and text that looks like a key are skipped before anything else sees them.
@@ -189,6 +191,11 @@ call in progress (Meeting), a design app (Creative), music playing (Media). The 
 first, and suggestions lean that way and stay quiet during calls. A change has to hold for a few seconds,
 a line says which mode and why, and one click pins it. Choose Study yourself. **Settings › Work mode**
 switches it off or turns off any of its signals; it never opens the notch and reads nothing new.
+
+**Focus sessions that stay focused.** While a focus timer runs, only requests and failures come through.
+Finished work, progress and suggestions wait, without a rim or badge. When the session ends, the notch says
+"Focus session finished · 25 min · 3 updates waited" with **Review**. This covers NotchFlow's own previews;
+macOS doesn't let apps hold other apps' notifications.
 
 How it's built: [Sixth Sense architecture](docs/sixth-sense/01-architecture.md) ·
 [plan and roadmap](docs/sixth-sense/02-plan.md) · [verification](docs/sixth-sense/03-verification.md).
@@ -328,7 +335,7 @@ Events go to an owner-only local inbox; there's no listening port. See the [even
 
 ## Status
 
-**Developer preview (0.2).** NotchFlow is built and tested on a MacBook Air with a notch: 170 Swift and 24
+**Developer preview (0.2).** NotchFlow is built and tested on a MacBook Air with a notch: 181 Swift and 24
 Python tests run in CI on every push, alongside Debug and universal Release builds, plus end-to-end hook
 checks and frame-by-frame recordings of its transitions. The newest features (the portal, screenshots,
 actions, the agent heartbeat, the split island, Time Travel and the sound island) were run on a Debug build

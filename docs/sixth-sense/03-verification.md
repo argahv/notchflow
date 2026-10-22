@@ -7,7 +7,7 @@ Run on 2026-10-22, macOS 27.0 (26A428), Xcode 27.1 (27A9275), Swift 6.4 toolchai
 
 | Check | Command | Result |
 |---|---|---|
-| NotchCore unit tests | `swift test` | **170 passed**, 0 failed (110 before this branch, 60 new) |
+| NotchCore unit tests | `swift test` | **181 passed**, 0 failed (110 before this branch, 71 new) |
 | Bridge and hook tests | `python3 -I Tests/test_bridge.py` | 24 passed |
 | Generated project is current | `python3 Scripts/generate_project.py && git diff --exit-code NotchFlow.xcodeproj` | Clean |
 | Debug build | `xcodebuild … -configuration Debug build` | Succeeded; no new warnings in changed files |
@@ -20,7 +20,10 @@ reset, no content in stored learning), `ActionCatalogTests.swift` (catalog agree
 unique ids, nothing destructive, only Fetch Title uses the network, permission and confirmation checks,
 surface tiers including the attention hold, which waiting glance goes next, the stuck-alert pitfall,
 privacy catalog coverage), `WorkModeTests.swift` (what each signal points to, switching signals off,
-Study never inferred, hysteresis, calls switching at once, shortcuts per mode, the mode's tilt on scores).
+Study never inferred, hysteresis, calls switching at once, shortcuts per mode, the mode's tilt on scores),
+`FlowGuardianTests.swift` (counting what waited once, pauses, summary wording, needs-input still coming
+through, suggestions held during focus, every download rule, a download's privacy class and gate rule, and
+what Extract and Actions declare).
 
 ## End-to-end in the running app
 
@@ -28,7 +31,8 @@ A Debug build ran with its own bundle id (`com.argahv.notchflow.dev`) and data f
 (`NOTCHFLOW_APP_SUPPORT`), driven through the Debug channel by [`Scripts/qa_suggestions.py`](../../Scripts/qa_suggestions.py).
 Copies enter at `ClipboardService.consider`, the same filters a real copy goes through. Activity events
 were written to the sandbox inbox as owner-only JSON, as agents and the CLI do. The app in front was
-scripted through the same gate as the real observer. **46 of 46 checks passed** across five scenarios:
+scripted through the same gate as the real observer, and the real pointer was ignored for the run.
+**58 of 58 checks passed, twice in a row**, across eight scenarios:
 
 - Turning copy suggestions on starts the clipboard source; turning them off stops it.
 - A tracked link copied in Xcode is suggested, with Copy Clean Link first; Why? opens and deepens the shape.
@@ -53,13 +57,20 @@ scripted through the same gate as the real observer. **46 of 46 checks passed** 
 - A call in progress switches to Meeting at once, offers Calendar, Notes and Sound, ranks the call first and
   holds a link suggestion; when the call ends the mode settles back to Developer. With following off, it's
   General.
+- A finished archive offers Extract and Show in Finder in place of its plain notice, and the inspector says
+  "Downloaded an archive" without the file's name. A finished image offers Actions, which opens Notch Actions
+  on it, kept by reference. A text file keeps the plain notice.
+- During a focus session a finished build waits without a glance, a deploy failure still comes through, and a
+  copy suggestion waits; at the end the Mission Complete glance says "1 min · 1 update and 1 suggestion
+  waited" with Review.
 
 **A note on running these on a Mac in use.** The sandboxed build draws its panel over the same notch as any
 installed NotchFlow, and its observers see the real Mac. In early runs a real click on the panel accepted a
 suggestion, and a real browser coming to the front moved the work mode, which both upset the script.
-Neither was a defect. The Debug channel now lets a script own the app-in-front source (`front:` until
-`front:real`). Pointer input over the notch still can't be excluded, so run the script without touching
-the notch.
+Neither was a defect. Later, real mouse movement closed a scripted drag and kept a suggestion waiting as if
+the pointer were over the notch. The Debug channel now lets a script own the app-in-front source (`front:`
+until `front:real`) and ignore the real pointer (`pointer:scripted` until `pointer:real`); the script does
+both, and the suite has since passed twice in a row on a Mac in use.
 
 Rendered snapshots of the link, Why?, color, JSON, kept-on-shelf and failure states were reviewed. They
 showed one real defect (action pills truncated to "Co…" and "O…"), fixed by keeping the controls at their
@@ -88,15 +99,19 @@ check only while a mode change is pending), and they weren't measured again.
 | Copy actions (Copy Clean Link, Copy as RGB/HSL, Copy Formatted) and their Undo | Same reason. They write through `ClipboardService.write`, the same own-change path as Copy Again, so NotchFlow doesn't re-read its own write. |
 | Hand-offs to Maps, Mail, Phone and Finder | They open other apps. The handlers were resolved with `NSWorkspace.urlForApplication(toOpen:)`: `maps://` → Maps, `tel:` → Phone, `mailto:` → the default mail handler. |
 | Remind Me, including the Reminders permission prompt | It writes to the person's Reminders and needs their approval. |
+| Extract on a real archive | It launches Archive Utility on this Mac. The handler path was checked to exist; the hand-off is one `NSWorkspace.open` call. |
+| The Review button after a focus session, and a real Download Center download | Review's navigation wasn't clicked by the script; downloads were posted as activity events, not saved by a browser into ~/Downloads. |
+| A focus session's end while typing | Mission Complete then only lights the rim, as it always has; the summary is in History but not shown. Not rechecked. |
 | VoiceOver announcement and reading order of the glance | Not tested with VoiceOver running. |
 | Reduce Motion, multiple displays, full-screen apps | The glance uses the shared reveal and surface motion, which already honor Reduce Motion, and the shared display geometry, but this branch didn't recheck them on screen. |
 | Light and dark wallpaper | The glance is drawn on the obsidian surface like every other glance; not rechecked on screen. |
 
 ## Known limitations
 
-- Two context sources only: the app in front and the clipboard. Others are on the roadmap in
+- Three context sources: the app in front, the clipboard and finished downloads. Others are on the roadmap in
   [02-plan.md](02-plan.md), and none is described as working.
-- Suggestions come from copies only. Downloads and screenshots keep their existing glances.
+- Suggestions come from copies and finished downloads. Screenshots keep their existing glance, and a download
+  no rule fits keeps its plain notice.
 - The engine can't know macOS Focus state, another app's microphone or camera, or whether the screen is
   shared. Quiet mode, quiet hours and Hide private details are the controls.
 - The secret filter is best effort, as before. Exclusions and Hide private details are the reliable

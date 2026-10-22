@@ -23,7 +23,7 @@ value per source. Every signal has a `PrivacyClass`:
 |---|---|---|---|---|
 | `system` | display or power changes | in full | no | yes |
 | `activity` | which app is in front | app name only | no | yes (ranking only) |
-| `content` | what was copied | kind and length only | **never** | **no** |
+| `content` | what was copied, a finished download's name | kind and length or size only | **never** | **no** |
 
 **Why a closed enum rather than a dictionary payload:** the brief asks for typed, testable events, and a
 closed enum means every new source is a compile-time decision with a privacy class attached.
@@ -47,6 +47,7 @@ for Settings. `ContextEngine` starts an observer only while a feature that consu
 |---|---|---|
 | Frontmost app | "Follow the app in front" or "Follow what I'm doing" (work mode) is on. A copy carries the app it was made in, so suggestions don't need this observer | `NSWorkspace.didActivateApplicationNotification`; no polling |
 | Clipboard | clipboard history **or** copy suggestions are on | the existing `changeCount` comparison (macOS has no change notification); one shared poll |
+| Finished downloads | download suggestions are on | handed over by the activity engine when any provider reports a completed download; the file's type and size are read, never its contents |
 
 ## ADR-4 · Intent is rules-first, explainable, and works with no model configured
 
@@ -121,6 +122,13 @@ comes back afterwards. It also fixed a stuck-alert bug: collapsing the notch whi
 the next queued alert "current" without showing it (`dismissCurrent`'s result was discarded).
 `AttentionCenter.closeCurrent` closes without promoting anything, and a test pins the old pitfall.
 
+## ADR-7 · Privacy is described by data
+
+`PrivacyCatalog` (`NotchCore/PrivacyCatalog.swift`) lists every capability that observes anything: what
+it observes, why, whether anything leaves the Mac, the macOS permission, where data is kept, how to turn
+it off and how to clear it. Settings › Privacy renders it, and tests check that every context source has
+an entry and that only capabilities that genuinely use the network say so.
+
 ## ADR-8 · Work modes change what's offered, never whether the notch opens
 
 `WorkMode` (`NotchCore/WorkModes.swift`) is the brief's Intent Switch: General, Developer, Meeting, Media,
@@ -142,12 +150,21 @@ mode" applies a preset, and "Pin Developer work mode" pins a work mode.
 General. Each signal can be switched off. The app-in-front observer runs while either ranking or mode
 inference needs it.
 
-## ADR-7 · Privacy is described by data
+## ADR-9 · A finished download gets one glance, and a focus session one summary
 
-`PrivacyCatalog` (`NotchCore/PrivacyCatalog.swift`) lists every capability that observes anything: what
-it observes, why, whether anything leaves the Mac, the macOS permission, where data is kept, how to turn
-it off and how to clear it. Settings › Privacy renders it, and tests check that every context source has
-an entry and that only capabilities that genuinely use the network say so.
+**Downloads.** When a completed download arrives, the engine is asked first. If a rule fits (an archive,
+a PDF, an image, video or audio), its suggestion replaces the download's plain notice; otherwise the notice
+shows as before. Either way it's one glance. Extract hands an archive to Archive Utility, and Actions keep
+the file on the shelf by reference before opening Notch Actions. The existing rule that a download is
+revealed, never opened, still holds: nothing is opened or run, and disk images and installer packages
+aren't treated as archives.
+
+**Flow Guardian.** While a focus timer runs, `AttentionContext.holdBelow` rises to needs-input, and
+suggestions are held with their own reason. What's held is counted in a `FocusLedger`, in memory, without
+pauses counting as focus. The session's end is the existing Mission Complete moment with a summary ("25 min ·
+2 updates and 1 suggestion waited") and Review. What waited is discarded from the alert queue, so it isn't
+replayed one glance at a time: it's in the stack and History. macOS offers no public way to hold other apps'
+notifications or read Focus, so this covers NotchFlow's own previews only.
 
 ## What this branch deliberately does not do
 
