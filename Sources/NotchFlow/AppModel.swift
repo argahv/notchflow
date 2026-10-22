@@ -1782,6 +1782,35 @@ struct CommandItem: Identifiable {
                              summary: summary.map { String($0.prefix(240)) }, progress: progress))
     }
 
+    // MARK: Agent Rescue
+
+    /// The brief being reviewed. It exists only here, editable, until the person copies it.
+    @Published var handoffDraft = ""
+    @Published private(set) var handoffCopied = false
+    @Published private(set) var handoffRun: URL?
+
+    /// Opens the brief for a failed run or build, to review, edit and copy for an agent. Nothing is fetched or sent.
+    func prepareHandoff(_ record: ActivityRecord) {
+        guard let brief = AgentRescue.brief(for: record.event) else { return }
+        handoffDraft = brief
+        handoffCopied = false
+        handoffRun = record.event.actionURL.flatMap(URL.init(string:)).flatMap { ["https", "http"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
+        dismissWork?.cancel()
+        attention.discard(id: record.id)
+        var next = snapshot; next.interaction.send(.expand); next.route = .handoff(record.id)
+        commit(next, also: { self.glance = .summary })
+        windows?.focus()
+    }
+
+    /// Copies the brief as edited, as NotchFlow's own write, so it's neither recorded nor suggested on.
+    func copyHandoff() {
+        let text = handoffDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        clipboard.write(text)
+        handoffCopied = true
+        illuminate(.green)
+    }
+
     // MARK: Screenshot Magnet
 
     let screenshots = ScreenshotService()
@@ -2408,6 +2437,10 @@ struct CommandItem: Identifiable {
             items.append(CommandItem(id: "workmode-auto", title: "Follow what I'm doing", symbol: "wand.and.rays", hint: "Work mode") { [weak self] in
                 self?.preferences.pinnedWorkMode = nil
             })
+        }
+        if let failure = queue.records.filter({ AgentRescue.canHandOff($0.event) }).max(by: { $0.event.timestamp < $1.event.timestamp }) {
+            items.append(CommandItem(id: "handoff", title: "Prepare agent handoff: \(failure.event.title)", symbol: "lifepreserver",
+                                     hint: "Agent Rescue") { [weak self] in self?.prepareHandoff(failure) })
         }
         let suggesting = preferences.suggestionsEnabled && preferences.clipboardSuggestions
         items.append(CommandItem(id: "suggestions", title: suggesting ? "Turn off copy suggestions" : "Turn on copy suggestions",

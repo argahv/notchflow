@@ -336,6 +336,13 @@ struct GlanceView: View {
             Spacer(minLength: 8)
             // The notification's own next step: Review a request (answered in the detail, never from
             // here), Join a call, Show a download, Open a failed run; otherwise View.
+            // Agent Rescue: a failure an agent could fix offers a brief to review and copy. Nothing is sent.
+            if AgentRescue.canHandOff(record.event) {
+                Button("Handoff") { model.prepareHandoff(record) }
+                    .buttonStyle(PillButtonStyle())
+                    .help("Prepare a brief about this failure for a coding agent, to review and copy. Nothing is sent.")
+                    .reveal(.detail)
+            }
             let primary = model.notificationAction(record)
             Button(primary.title) { primary.perform() }
                 .buttonStyle(PillButtonStyle(prominent: true))
@@ -746,6 +753,7 @@ struct WorkspaceView: View {
                     case .capture(let mode): CaptureSurface(model: model, mode: mode)
                     case .actions: ActionsSurface(model: model)
                     case .timeline: TimelineSurface(model: model)
+                    case .handoff: HandoffSurface(model: model)
                     }
                 }
             }

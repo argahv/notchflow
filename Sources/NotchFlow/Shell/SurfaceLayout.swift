@@ -69,6 +69,9 @@ enum Metrics {
     static let suggestionWing = 176.0
     /// The Workflows row under the actions, when a chain fits the items.
     static let chainRow = 26.0
+    /// Agent Rescue: the line saying nothing is sent, and the editable brief.
+    static let handoffNote = 32.0
+    static let handoffEditor = 190.0
     /// A one-time discovery tip under the quick-access shortcuts.
     static let hintRow = 18.0
     static let historyRow = 44.0
@@ -248,6 +251,8 @@ enum Metrics {
             height += count == 0 ? Metrics.emptyRow : stack(rows, Metrics.actionRow, gap: 6)
             if !model.actionChains.isEmpty { height += Metrics.gap + Metrics.chainRow }
             return height + actionResultHeight(model.actionRun.phase) + pad
+        case .handoff:
+            return pad + Metrics.header + Metrics.gap + Metrics.handoffNote + Metrics.gap + Metrics.handoffEditor + Metrics.gap + 26 + pad
         case .timeline:
             return pad + Metrics.header + Metrics.gap
                 + (model.timeline.isEmpty ? Metrics.emptyRow : Metrics.timelineStage + Metrics.gap + 26) + pad

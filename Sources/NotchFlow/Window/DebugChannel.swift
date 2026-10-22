@@ -84,6 +84,9 @@ import AppKit
             case "sensitivity": if parts.count > 1, let value = SuggestionSensitivity(rawValue: parts[1]) { model.preferences.suggestionSensitivity = value }
             default: break
             }
+        case "rescue":
+            // "rescue:<activity id>" opens its handoff brief; "rescue:copy" copies it (to the real clipboard).
+            if argument == "copy" { model.copyHandoff() } else if let record = model.record(argument) { model.prepareHandoff(record) }
         case "chain":
             // "chain:<preset id>": the preset on every shelf item it accepts, as if chosen in the action surface.
             guard let chain = ActionChain.presets.first(where: { $0.id == argument }) else { break }
@@ -243,6 +246,10 @@ import AppKit
             let next: String = model.nextSteps.map(\.action.rawValue).joined(separator: ",")
             let chainLine: String = "chain: \(chainStep) · next \(next)"
             let hits: [String] = model.commandQuery.isEmpty ? [] : model.commandResults.map(\.id).filter { $0.hasPrefix("shelf-") || $0.hasPrefix("clip-") }
+            var offered = false
+            if case .notification(let shown) = model.glanceLead { offered = AgentRescue.canHandOff(shown.event) }
+            let briefTitle: String = model.handoffDraft.split(separator: "\n").first.map(String.init) ?? "-"
+            let handoffLine: String = "handoff: offered \(offered) · \(briefTitle) · \(model.handoffDraft.count) chars · copied \(model.handoffCopied)"
             let searchLine: String = "search: " + (hits.isEmpty ? "-" : hits.map { String($0.prefix(5)) }.joined(separator: ","))
             let lines = model.providers.statuses.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.label)" }
                 + ["route: \(model.route) · \(model.interaction.presentation)",
@@ -270,7 +277,7 @@ import AppKit
                    "inspector: " + model.contextEngine.log.prefix(6).map(\.text).joined(separator: " | "),
                    "learning: " + model.learnedRules.sorted { $0.key < $1.key }.map { "\($0.key) +\($0.value.accepted) -\($0.value.dismissed) ~\($0.value.ignored)" }.joined(separator: ", "),
                    "clipboard: history \(model.clipboard.enabled) · items \(model.clipboard.items.count) · skipped \(model.clipboard.skipped)",
-                   chainLine, searchLine,
+                   chainLine, searchLine, handoffLine,
                    "waiting: " + model.waitingGlances.map { "\($0.kind.rawValue)/\($0.tier.title)" }.joined(separator: ","),
                    "focus: \(model.focus.active ? (model.focusing ? "holding" : "paused") : "off") · waiting \(model.focus.entries.count) · last \(model.focusSummary.map { "\($0.record) \($0.detail) waited=\($0.waited)" } ?? "-")",
                    "work mode: \(model.workMode.rawValue) · \(model.workModeReason) · pending \(model.pendingModeReading?.mode.rawValue ?? "-") · shortcuts \(model.workMode.shortcuts.map(\.rawValue).joined(separator: ",")) · line \(model.showsModeLine)"]

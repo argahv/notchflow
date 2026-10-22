@@ -121,6 +121,8 @@ enum Route: Hashable {
     case actions
     /// Time Travel: recent finished work and kept content, one moment at a time.
     case timeline
+    /// Agent Rescue: the brief for a failed run (by activity id), to review and copy for an agent.
+    case handoff(String)
 
     static func root(_ feature: Feature) -> Route {
         switch feature {
@@ -138,7 +140,7 @@ enum Route: Hashable {
         case .shelf: .shelf
         case .tools: .tools
         case .history: .history
-        case .command, .capture, .actions, .timeline: nil
+        case .command, .capture, .actions, .timeline, .handoff: nil
         }
     }
     /// Identity of the content view; sub-routes share their feature's view.
@@ -147,6 +149,7 @@ enum Route: Hashable {
         case .capture: "capture"
         case .actions: "actions"
         case .timeline: "timeline"
+        case .handoff: "handoff"
         default: feature?.rawValue ?? "command"
         }
     }
@@ -158,6 +161,7 @@ enum Route: Hashable {
         // What was acted on lives on the shelf; going back lands there.
         case .actions: .shelf
         case .timeline: .history(detail: nil)
+        case .handoff(let id): .activity(detail: id)
         default: nil
         }
     }

@@ -5,7 +5,7 @@ Debug builds only, with their own data folder so nothing reaches your real shelf
     xcodebuild -project NotchFlow.xcodeproj -scheme NotchFlow -configuration Debug -derivedDataPath build/Sandbox \
       PRODUCT_BUNDLE_IDENTIFIER=com.argahv.notchflow.dev CODE_SIGNING_ALLOWED=NO build
     NOTCHFLOW_APP_SUPPORT="$PWD/build/sandbox-data" build/Sandbox/Build/Products/Debug/NotchFlow.app/Contents/MacOS/NotchFlow &
-    python3 -I Scripts/qa_suggestions.py "$PWD/build/sandbox-data" [all|basic|shelf|coordination|regression|surface|modes|downloads|focus|chains]
+    python3 -I Scripts/qa_suggestions.py "$PWD/build/sandbox-data" [all|basic|shelf|coordination|regression|surface|modes|downloads|focus|chains|rescue]
 
 Copies are fed to ClipboardService.consider (the filters a real copy passes), so the real clipboard is never
 read or written. Activity events are written to the sandbox inbox only. Snapshots land in <data>/debug/*.png.
@@ -41,7 +41,7 @@ def snap(name, light=False):
     return os.path.join(DEBUG, f"{name}.png")
 
 
-def event(activity, state, title, category="build", summary=None, action_url=None):
+def event(activity, state, title, category="build", summary=None, action_url=None, extra=None):
     now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     phase = {"failed": "failed", "completed": "completed", "running": "progress", "needsInput": "waiting"}[state]
     body = {"version": 2, "source": "qa", "activityId": activity, "phase": phase, "state": state, "title": title,
@@ -50,6 +50,7 @@ def event(activity, state, title, category="build", summary=None, action_url=Non
         body["summary"] = summary
     if action_url:
         body["actionURL"] = action_url
+    body.update(extra or {})
     path = os.path.join(INBOX, f"qa-{uuid.uuid4().hex}.json")
     with open(path, "w") as handle:
         json.dump(body, handle)
@@ -393,6 +394,31 @@ if scenario in ("all", "chains"):
     send("query:", "close", "shelf:clear", "suggest:off", wait=0.8)
     for path in originals:
         os.remove(path)
+
+if scenario in ("all", "rescue"):
+    # Agent Rescue: a failed run offers a brief to review and copy; nothing is sent, and the clipboard isn't touched here.
+    tag = uuid.uuid4().hex[:6]
+    send("close", "suggest:off", "focus:stop", wait=1.0)
+    event("ci-" + tag, "failed", "Unit tests", category="ci", summary="3 tests failed in CheckoutTests",
+          action_url="https://github.com/argahv/notchflow/actions/runs/42", extra={"project": "argahv/notchflow", "branch": "main"})
+    time.sleep(1.4)
+    s = status()
+    check("a failed CI run's glance offers Handoff", f'notification("qa:ci-{tag}")' in s.get("capture", "") and "offered true" in s.get("handoff", ""),
+          f"{s.get('capture')} | {s.get('handoff')}")
+    snap("qa-10-failure-handoff")
+    send(f"rescue:qa:ci-{tag}", wait=1.2)
+    s = status()
+    check("Handoff opens the brief to review, in the workspace", f'handoff("qa:ci-{tag}")' in s.get("route", "") and "expanded" in s.get("route", ""),
+          s.get("route"))
+    check("the brief names the failure", "## CI run failed: Unit tests" in s.get("handoff", "") and "copied false" in s.get("handoff", ""), s.get("handoff"))
+    snap("qa-11-handoff")
+    send("close", wait=1.0)
+    send("notification:dismiss", wait=0.6)
+    event("dl-" + tag, "failed", "Download failed", category="download")
+    time.sleep(1.4)
+    s = status()
+    check("a failed download isn't offered a handoff", "offered false" in s.get("handoff", ""), s.get("handoff"))
+    send("notification:dismiss", wait=0.6)
 
 send("pointer:real", "front:real", wait=0.3)
 print()
