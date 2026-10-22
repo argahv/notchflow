@@ -88,6 +88,13 @@ import UniformTypeIdentifiers
             let id = result.added.first ?? shelf.items.first { shelf.resolve($0)?.standardizedFileURL.path == url.path }?.id
             guard let id else { return .failed(result.message ?? "It couldn't be kept on the shelf.") }
             return .openActions([id], then: then)
+        case .keepAndAct(let text, let then):
+            let incoming: ShelfIncoming = ShelfPolicy.link(from: text).map { .link($0) } ?? .text(text, rich: nil)
+            let result = shelf.intake([incoming], origin: "suggestion")
+            // Already on the shelf: use that item rather than refuse.
+            let id = result.added.first ?? shelf.items.first { $0.text == text }?.id
+            guard let id else { return .failed(result.message ?? "It couldn't be kept on the shelf.") }
+            return .openActions([id], then: then)
         case .newNote(let text):
             guard let store = notes() else { return .failed("Notes aren't available right now.") }
             let note = Note(text: text)

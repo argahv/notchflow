@@ -83,6 +83,19 @@ final class ActionChainTests: XCTestCase {
         }
     }
 
+    func testAChainRunMovesThroughItsStepsAsOneAttempt() {
+        var run = ActionRun()
+        let token = run.start(.resizeHalf)!
+        run.advance(to: .compress, token: token)
+        XCTAssertEqual(run.phase, .processing(.compress, progress: nil))
+        run.advance(to: .createArchive, token: token + 1)
+        XCTAssertEqual(run.phase, .processing(.compress, progress: nil), "A stale attempt can't move it")
+        run.finish(.created(["a.zip"]), token: token)
+        XCTAssertEqual(run.phase, .completed(.compress, .created(["a.zip"])), "The result belongs to the last step")
+        run.advance(to: .copy, token: token)
+        XCTAssertEqual(run.phase, .completed(.compress, .created(["a.zip"])), "A finished run doesn't move")
+    }
+
     func testLinksOfferAQRCodeAndFilesCanGoIntoAnArchive() {
         XCTAssertTrue(ActionRegistry.actions(for: ContentContext(kind: .link, title: "x")).contains(.qrCode))
         XCTAssertTrue(ActionRegistry.actions(for: ContentClassifier.collection([.image, .pdf, .video])).contains(.createArchive))

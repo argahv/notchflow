@@ -5,7 +5,7 @@ Debug builds only, with their own data folder so nothing reaches your real shelf
     xcodebuild -project NotchFlow.xcodeproj -scheme NotchFlow -configuration Debug -derivedDataPath build/Sandbox \
       PRODUCT_BUNDLE_IDENTIFIER=com.argahv.notchflow.dev CODE_SIGNING_ALLOWED=NO build
     NOTCHFLOW_APP_SUPPORT="$PWD/build/sandbox-data" build/Sandbox/Build/Products/Debug/NotchFlow.app/Contents/MacOS/NotchFlow &
-    python3 -I Scripts/qa_suggestions.py "$PWD/build/sandbox-data" [all|basic|shelf|coordination|regression|surface|modes|downloads|focus]
+    python3 -I Scripts/qa_suggestions.py "$PWD/build/sandbox-data" [all|basic|shelf|coordination|regression|surface|modes|downloads|focus|chains]
 
 Copies are fed to ClipboardService.consider (the filters a real copy passes), so the real clipboard is never
 read or written. Activity events are written to the sandbox inbox only. Snapshots land in <data>/debug/*.png.
@@ -333,6 +333,66 @@ if scenario in ("all", "focus"):
     check("as the session's own end-of-session glance (unless you were typing)", shown, f"{s.get('capture')} | {s.get('celebration')}")
     snap("qa-9-focus-end")
     send("notification:dismiss", "suggest:off", wait=0.6)
+
+if scenario in ("all", "chains"):
+    # Action Chains, the Next Action, QR Bridge and one search, through the real executors and the real shelf.
+    import glob, hashlib, shutil, zipfile
+    media = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "media")
+    tag = uuid.uuid4().hex[:6]
+    originals = [os.path.join(ROOT, f"qa-chain-{tag}-{name}") for name in ("one.png", "two.png")]
+    for source, target in zip(("resting.png", "portal.png"), originals):
+        shutil.copyfile(os.path.join(media, source), target)
+    digest = lambda path: hashlib.sha256(open(path, "rb").read()).hexdigest()
+    before = [digest(path) for path in originals]
+
+    def until(predicate, seconds=20):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            current = status()
+            if predicate(current):
+                return current
+            time.sleep(0.5)
+        return status()
+
+    send("close", "shelf:clear", "suggest:on", "suggest:reset", "privacy:off", "focus:stop", wait=1.0)
+    send("drop:file:" + "|".join(originals), wait=1.5)
+    send("chain:web-ready-images", wait=0.5)
+    s = until(lambda s: s.get("chain", "").startswith("-") and "completed(" in s.get("action", ""))
+    check("Web-Ready Images runs both steps and hands its results to the shelf", "completed(NotchFlow.ContentAction.compress" in s.get("action", "")
+          and "created: 2" in s.get("action", ""), s.get("action"))
+    shelf_root = os.path.join(ROOT, "Shelf")
+    # The resized copies the first step made ("one (50%).png") are removed; the final files keep the name.
+    halves = glob.glob(os.path.join(ROOT, "**", "*(50%).png"), recursive=True)
+    check("what it made in between is gone", not halves, ", ".join(os.path.basename(p) for p in halves))
+    check("the originals are byte for byte unchanged", [digest(path) for path in originals] == before)
+    check("the next step for two new images is an archive", s.get("chain", "").endswith("next createArchive,copy"), s.get("chain"))
+    history = json.load(open(os.path.join(ROOT, "activities.json")))
+    chains = [r for r in history.get("records", []) if r.get("event", {}).get("source") == "chain"]
+    check("the chain is a task in the stack and History", any(r["event"].get("state") == "completed" and "originals unchanged" in (r["event"].get("summary") or "")
+                                                          for r in chains), str([r["event"].get("summary") for r in chains][-1:]))
+    send("next:0", wait=0.5)
+    s = until(lambda s: "completed(NotchFlow.ContentAction.createArchive" in s.get("action", ""))
+    archives = sorted(glob.glob(os.path.join(ROOT, "**", "Archive*.zip"), recursive=True), key=os.path.getmtime)
+    entries = zipfile.ZipFile(archives[-1]).namelist() if archives else []
+    check("the next step makes one ZIP of both results", len([e for e in entries if e.endswith((".jpg", ".jpeg"))]) == 2, f"{s.get('action')} | {entries}")
+    # Closing the workspace lets the chain's finished notice show; a suggestion waits behind it, so clear it first.
+    send("close", "shelf:clear", wait=1.2)
+    send("notification:dismiss", wait=1.0)
+    send("clip:https://example.com/qa-" + tag, wait=1.3)
+    s = status()
+    check("a copied link offers a QR code", "QR Code" in s.get("suggestion", ""), s.get("suggestion"))
+    parts = s.get("suggestion", "").split(" · ")
+    actions = parts[2].split(",") if len(parts) > 2 else []
+    send(f"suggest:run:{actions.index('QR Code') if 'QR Code' in actions else 99}", wait=0.5)
+    s = until(lambda s: "completed(NotchFlow.ContentAction.qrCode" in s.get("action", ""))
+    codes = glob.glob(os.path.join(ROOT, "**", "QR example.com*.png"), recursive=True)
+    check("QR Code makes a PNG on the shelf, and Copy comes next", codes and s.get("chain", "").endswith("next copy"), f"{s.get('action')} | {s.get('chain')}")
+    send("open:command", "query:QR example", wait=0.8)
+    s = status()
+    check("one search finds what's on the shelf", "shelf" in s.get("search", ""), s.get("search"))
+    send("query:", "close", "shelf:clear", "suggest:off", wait=0.8)
+    for path in originals:
+        os.remove(path)
 
 send("pointer:real", "front:real", wait=0.3)
 print()

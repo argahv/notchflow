@@ -84,6 +84,15 @@ import AppKit
             case "sensitivity": if parts.count > 1, let value = SuggestionSensitivity(rawValue: parts[1]) { model.preferences.suggestionSensitivity = value }
             default: break
             }
+        case "chain":
+            // "chain:<preset id>": the preset on every shelf item it accepts, as if chosen in the action surface.
+            guard let chain = ActionChain.presets.first(where: { $0.id == argument }) else { break }
+            let ids = model.shelf.items.filter { chain.accepts.contains(ContentInspector.context(for: $0, shelf: model.shelf).kind) }.map(\.id)
+            model.openActions(ids)
+            model.runChain(chain)
+        case "next":
+            // "next:<index>": the Next Action button after an action made files.
+            if let index = Int(argument), model.nextSteps.indices.contains(index) { model.runNext(model.nextSteps[index]) }
         case "pointer":
             // "pointer:scripted" ignores the real pointer (position, movement, drags, clicks); "pointer:real" undoes it.
             windows.scriptedPointer = argument == "scripted"
@@ -230,6 +239,11 @@ import AppKit
                 windows.snapshot(to: AppFiles.root.appendingPathComponent("debug/\(name).png"), light: parts.dropFirst().first == "light")
             }
         case "status":
+            let chainStep: String = model.chainProgress.map { "\($0.chain.id) · \($0.label)" } ?? "-"
+            let next: String = model.nextSteps.map(\.action.rawValue).joined(separator: ",")
+            let chainLine: String = "chain: \(chainStep) · next \(next)"
+            let hits: [String] = model.commandQuery.isEmpty ? [] : model.commandResults.map(\.id).filter { $0.hasPrefix("shelf-") || $0.hasPrefix("clip-") }
+            let searchLine: String = "search: " + (hits.isEmpty ? "-" : hits.map { String($0.prefix(5)) }.joined(separator: ","))
             let lines = model.providers.statuses.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.label)" }
                 + ["route: \(model.route) · \(model.interaction.presentation)",
                    "hover: \(model.hoverChoice.primary?.id ?? "-") + \(model.hoverChoice.secondary?.id ?? "-") +\(model.hoverChoice.others) · pin: \(model.hoverPin ?? "-")",
@@ -256,6 +270,7 @@ import AppKit
                    "inspector: " + model.contextEngine.log.prefix(6).map(\.text).joined(separator: " | "),
                    "learning: " + model.learnedRules.sorted { $0.key < $1.key }.map { "\($0.key) +\($0.value.accepted) -\($0.value.dismissed) ~\($0.value.ignored)" }.joined(separator: ", "),
                    "clipboard: history \(model.clipboard.enabled) · items \(model.clipboard.items.count) · skipped \(model.clipboard.skipped)",
+                   chainLine, searchLine,
                    "waiting: " + model.waitingGlances.map { "\($0.kind.rawValue)/\($0.tier.title)" }.joined(separator: ","),
                    "focus: \(model.focus.active ? (model.focusing ? "holding" : "paused") : "off") · waiting \(model.focus.entries.count) · last \(model.focusSummary.map { "\($0.record) \($0.detail) waited=\($0.waited)" } ?? "-")",
                    "work mode: \(model.workMode.rawValue) · \(model.workModeReason) · pending \(model.pendingModeReading?.mode.rawValue ?? "-") · shortcuts \(model.workMode.shortcuts.map(\.rawValue).joined(separator: ",")) · line \(model.showsModeLine)"]

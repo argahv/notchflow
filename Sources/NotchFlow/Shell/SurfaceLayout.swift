@@ -67,6 +67,8 @@ enum Metrics {
     static let suggestionWhy = 38.0
     /// Room for the text beside two action pills, "Why?" and dismiss.
     static let suggestionWing = 176.0
+    /// The Workflows row under the actions, when a chain fits the items.
+    static let chainRow = 26.0
     /// A one-time discovery tip under the quick-access shortcuts.
     static let hintRow = 18.0
     static let historyRow = 44.0
@@ -244,6 +246,7 @@ enum Metrics {
             let rows = (count + Metrics.actionColumns - 1) / Metrics.actionColumns
             var height = pad + Metrics.header + Metrics.gap + Metrics.actionContext + Metrics.gap
             height += count == 0 ? Metrics.emptyRow : stack(rows, Metrics.actionRow, gap: 6)
+            if !model.actionChains.isEmpty { height += Metrics.gap + Metrics.chainRow }
             return height + actionResultHeight(model.actionRun.phase) + pad
         case .timeline:
             return pad + Metrics.header + Metrics.gap

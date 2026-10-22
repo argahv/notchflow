@@ -218,6 +218,11 @@ public struct ActionRun: Equatable, Sendable {
         phase = .processing(action, progress: nil)
         return token
     }
+    /// A chain moved on to its next step: the same attempt, now running a different action.
+    public mutating func advance(to action: ContentAction, token: Int) {
+        guard token == self.token, isProcessing else { return }
+        phase = .processing(action, progress: nil)
+    }
     public mutating func progress(_ value: Double, token: Int) {
         guard token == self.token, case .processing(let action, _) = phase, value.isFinite else { return }
         phase = .processing(action, progress: min(1, max(0, value)))

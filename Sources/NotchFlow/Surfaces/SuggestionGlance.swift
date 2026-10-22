@@ -117,6 +117,8 @@ enum SuggestionWording {
         case .keepOnShelf: "Keeps it on the shelf, where Actions can do more with it. Undo removes it."
         case .newNote: "Saves it as a note in Tools › Notes. Undo removes it."
         case .extractArchive: "Expands it next to the archive with Archive Utility. The archive stays where it is."
+        case .keepAndAct(_, let then): then == .qrCode ? "Makes a QR code for the link on this Mac and keeps it on the shelf, to scan from a phone."
+            : "Keeps it on the shelf and runs \(then.title)"
         case .openActions(_, let then): (then.map { "\($0.title), on this Mac. " } ?? "") + "Keeps it on the shelf by reference; the original isn't changed."
         }
     }

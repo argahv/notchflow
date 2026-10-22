@@ -65,6 +65,8 @@ public enum SuggestedAction: Hashable, Sendable {
     case extractArchive(path: String)
     /// Keeps a file on the shelf by reference and opens Notch Actions for it, starting `then` if given.
     case openActions(path: String, then: ContentAction?)
+    /// Keeps text or a link on the shelf and opens Notch Actions for it, starting `then` (a link's QR code).
+    case keepAndAct(String, then: ContentAction)
 
     public var title: String {
         switch self {
@@ -80,6 +82,7 @@ public enum SuggestedAction: Hashable, Sendable {
         case .newNote: "New Note"
         case .extractArchive: "Extract"
         case .openActions(_, let then): then?.title ?? "Actions…"
+        case .keepAndAct(_, let then): then.title
         }
     }
     public var symbol: String {
@@ -96,6 +99,7 @@ public enum SuggestedAction: Hashable, Sendable {
         case .newNote: "square.and.pencil"
         case .extractArchive: "archivebox"
         case .openActions: "wand.and.stars"
+        case .keepAndAct(_, let then): then == .qrCode ? "qrcode" : "wand.and.stars"
         }
     }
 }
@@ -406,6 +410,8 @@ enum IntentRules {
             // Copied from a browser, the page is already open there.
             if !inBrowser { actions.append(.openURL(url)) }
             actions.append(.keepOnShelf(text))
+            // QR Bridge: a code for the link, made on this Mac, to scan from a phone.
+            actions.append(.keepAndAct(text, then: .qrCode))
             var candidate = make("clipboard.link", .links, base: 0.7, match: "a web link",
                                  title: cleaned == nil ? "Link copied" : "Link with \(trackers) \(trackers == 1 ? "tracker" : "trackers")",
                                  detail: shortLink(url) + (clip.sourceName.map { " · \($0)" } ?? ""), symbol: "link", actions: actions,

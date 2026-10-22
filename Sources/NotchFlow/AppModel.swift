@@ -1576,6 +1576,11 @@ struct CommandItem: Identifiable {
         case .uppercase, .lowercase, .titleCase, .cleanWhitespace, .wordCount, .detectLanguage:
             guard let text else { throw ActionExecutor.Failure.noText }
             return try ActionExecutor.text(action, text)
+        case .qrCode:
+            guard let link else { throw ActionExecutor.Failure.unsupported }
+            return try ActionExecutor.qrCode(link)
+        case .createArchive:
+            return try await ActionExecutor.archive(urls, progress: progress)
         default:
             throw ActionExecutor.Failure.unsupported
         }
@@ -1596,7 +1601,7 @@ struct CommandItem: Identifiable {
         reflow()
     }
 
-    func cancelAction() { actionTask?.cancel(); actionTask = nil; actionRun.cancel(); reflow() }
+    func cancelAction() { actionTask?.cancel(); actionTask = nil; actionRun.cancel(); chainProgress = nil; reflow() }
     func dismissActionResult() { actionRun.reset(); actionCreated = []; reflow() }
 
     /// Removes what the last action created, files and all.
@@ -1643,6 +1648,138 @@ struct CommandItem: Identifiable {
             self.captureText = .idle; self.annotatedCopy = nil; self.annotations = AnnotationDocument()
             self.annotateCapture()
         }
+    }
+
+    // MARK: Action Chains and the Next Action
+
+    /// The chain running in the action surface, step by step.
+    @Published private(set) var chainProgress: ChainProgress?
+
+    /// Workflows that fit the items in the action surface.
+    var actionChains: [ActionChain] {
+        guard let context = actionContext else { return [] }
+        return ActionChain.applicable(to: context.kind == .collection ? context.members : [context.kind])
+    }
+
+    /// What usually follows the last action, for what it just made (see `NextActionRules`).
+    var nextSteps: [NextStep] {
+        guard case .completed(let action, .created) = actionRun.phase, !actionCreated.isEmpty else { return [] }
+        let made = shelf.items.filter { actionCreated.contains($0.id) }.map { ContentInspector.context(for: $0, shelf: shelf).kind }
+        guard let kind = made.first else { return [] }
+        return NextActionRules.after(action, made: made.allSatisfy { $0 == kind } ? kind : .file, count: made.count)
+    }
+
+    /// Continues with what was just made: its actions open in the same surface, starting the step.
+    func runNext(_ step: NextStep) { openActions(actionCreated, then: step.action) }
+
+    /// Runs a chain on the items in the action surface as one task: the same executor and the same capability
+    /// check as each single action, its progress in the stack too, and only the last step's files on the shelf.
+    func runChain(_ chain: ActionChain) {
+        let items = actionItems
+        let inputs = items.compactMap { item in shelf.resolve(item).map { ($0, ContentInspector.context(for: item, shelf: shelf).kind) } }
+        guard chain.applies(to: inputs.map(\.1)), inputs.count == items.count, !actionRun.isProcessing else { return }
+        guard chain.steps.allSatisfy({ ActionGuard.clearance(for: ActionCatalog.descriptor(for: $0), granted: [], confirmed: false) == .run }) else {
+            message = "\(chain.title) needs a confirmation the notch can't ask for yet."; return
+        }
+        guard let token = actionRun.start(chain.steps[0]) else { return }
+        actionCreated = []
+        chainProgress = ChainProgress(chain: chain)
+        let activity = "chain-" + UUID().uuidString
+        publishChain(activity, chain: chain, state: .running, summary: chainProgress?.label, progress: 0)
+        reflow()
+        actionTask = Task { [weak self] in
+            var artifacts = ChainArtifacts(inputs: inputs.map(\.0))
+            var kinds = Dictionary(inputs, uniquingKeysWith: { first, _ in first })
+            // Files a step has made but not yet handed on; removed too if the run stops partway through a step.
+            var inFlight: [URL] = []
+            do {
+                for (index, step) in chain.steps.enumerated() {
+                    try Task.checkCancellation()
+                    self?.chainAdvance(to: index, token: token, activity: activity)
+                    let current = artifacts.current
+                    switch ActionChains.scope(of: step) {
+                    case .all:
+                        let output = try await Self.execute(step, kind: .collection, urls: current, link: nil, text: nil) { value in
+                            Task { @MainActor in self?.chainReport(value, token: token) }
+                        }
+                        inFlight = output.files
+                    case .each:
+                        for (offset, url) in current.enumerated() {
+                            try Task.checkCancellation()
+                            let output = try await Self.execute(step, kind: kinds[url] ?? .file, urls: [url], link: nil, text: nil) { _ in }
+                            inFlight += output.files
+                            self?.chainReport(Double(offset + 1) / Double(current.count), token: token)
+                        }
+                    }
+                    guard !inFlight.isEmpty else { throw ActionExecutor.Failure.unsupported }
+                    let made = ActionChains.output(of: step, from: current.first.flatMap { kinds[$0] } ?? .file) ?? .file
+                    for url in inFlight { kinds[url] = made }
+                    artifacts.stepFinished(made: inFlight)
+                    inFlight = []
+                }
+                let result = artifacts.finished()
+                result.remove.forEach(ShelfService.deleteCopy)
+                if let self { self.finishChain(result.keep, token: token, activity: activity) } else { result.keep.forEach(ShelfService.deleteCopy) }
+            } catch {
+                (inFlight + artifacts.abandon()).forEach(ShelfService.deleteCopy)
+                self?.chainStopped(error, token: token, activity: activity)
+            }
+        }
+    }
+
+    private func chainAdvance(to index: Int, token: Int, activity: String) {
+        guard actionRun.token == token, var progress = chainProgress else { return }
+        progress.begin(step: index)
+        chainProgress = progress
+        actionRun.advance(to: progress.current, token: token)
+        actionRun.progress(progress.overall, token: token)
+        publishChain(activity, chain: progress.chain, state: .running, summary: progress.label, progress: progress.overall)
+        reflow()
+    }
+
+    private func chainReport(_ fraction: Double, token: Int) {
+        guard actionRun.token == token, var progress = chainProgress else { return }
+        progress.report(fraction)
+        chainProgress = progress
+        actionRun.progress(progress.overall, token: token)
+    }
+
+    private func finishChain(_ files: [URL], token: Int, activity: String) {
+        guard actionRun.token == token, actionRun.isProcessing, let progress = chainProgress else { files.forEach(ShelfService.deleteCopy); return }
+        chainProgress = nil
+        let result = shelf.intake(files.map(ShelfIncoming.copy), origin: "chain")
+        actionCreated = result.added
+        guard !result.added.isEmpty else {
+            let reason = result.message ?? "The results couldn't be added to the shelf."
+            actionRun.fail(reason, token: token)
+            publishChain(activity, chain: progress.chain, state: .failed, summary: reason)
+            reflow(); return
+        }
+        actionRun.finish(.created(files.map(\.lastPathComponent)), token: token)
+        publishChain(activity, chain: progress.chain, state: .completed,
+                     summary: "\(files.count) \(files.count == 1 ? "file" : "files") on the shelf · originals unchanged")
+        illuminate(.green)
+        reflow()
+    }
+
+    private func chainStopped(_ error: Error, token: Int, activity: String) {
+        let progress = chainProgress
+        if actionRun.token == token { chainProgress = nil }
+        guard let progress else { return }
+        if error is CancellationError || actionRun.token != token {
+            publishChain(activity, chain: progress.chain, state: .cancelled, summary: "Cancelled · nothing it made was kept")
+        } else {
+            let reason = "\(progress.current.title): \(error.localizedDescription)"
+            actionRun.fail(reason, token: token)
+            publishChain(activity, chain: progress.chain, state: .failed, summary: reason + " · nothing it made was kept")
+        }
+        reflow()
+    }
+
+    /// A chain is a task like any other: its progress and result show in the stack and History.
+    private func publishChain(_ id: String, chain: ActionChain, state: ActivityState, summary: String?, progress: Double? = nil) {
+        ingest(ActivityEvent(source: "chain", activityId: id, state: state, title: chain.title, category: .task,
+                             summary: summary.map { String($0.prefix(240)) }, progress: progress))
     }
 
     // MARK: Screenshot Magnet
@@ -2286,7 +2423,20 @@ struct CommandItem: Identifiable {
                 self?.navigate(.history(detail: record.id))
             }
         }
-        return items.filter { $0.title.lowercased().contains(query) || ($0.hint?.lowercased().contains(query) ?? false) } + activities
+        // One search across what NotchFlow already holds: the shelf, and clipboard history unless details are hidden.
+        let shelfHits = shelf.items.filter { $0.name.lowercased().contains(query) || ($0.text?.lowercased().contains(query) ?? false) }
+            .prefix(4).map { item in
+                CommandItem(id: "shelf-\(item.id)", title: item.name, symbol: Feature.shelf.symbol, hint: "Shelf") { [weak self] in
+                    self?.openActions([item.id])
+                }
+            }
+        let clipHits = preferences.privacy ? [] : clipboard.items.filter { $0.text.lowercased().contains(query) }.prefix(3).map { clip in
+            CommandItem(id: "clip-\(clip.id)", title: SuggestionText.preview(clip.text), symbol: Tool.clipboard.symbol, hint: "Copy again") { [weak self] in
+                self?.clipboard.copy(clip)
+            }
+        }
+        return items.filter { $0.title.lowercased().contains(query) || ($0.hint?.lowercased().contains(query) ?? false) }
+            + activities + Array(shelfHits) + Array(clipHits)
     }
 
     // MARK: Services

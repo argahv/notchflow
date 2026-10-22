@@ -140,6 +140,8 @@ public enum ActionCatalog {
         case .extractArchive:
             // Archive Utility expands it next to the archive; the archive itself is left as it is.
             return ActionDescriptor(id: "suggest.extractArchive", title: title, inputs: [.file], outputs: [.folder], impact: .opensElsewhere)
+        case .keepAndAct:
+            return ActionDescriptor(id: "suggest.keepAndAct", title: title, inputs: [.text, .link], outputs: [.shelfItem], impact: .createsRecord)
         case .openActions:
             // A reference on the shelf; each Notch Action it leads to is checked on its own.
             return ActionDescriptor(id: "suggest.openActions", title: title, inputs: [.file, .pdf, .image, .video, .audio],
@@ -153,6 +155,7 @@ public enum ActionCatalog {
         .composeEmail("a@example.com"), .call("+1 555 0100"), .remind(title: "x", due: Date(timeIntervalSince1970: 0)),
         .reveal(path: "/tmp"), .openFile(path: "/tmp"), .keepOnShelf("x"), .newNote("x"),
         .extractArchive(path: "/tmp/a.zip"), .openActions(path: "/tmp/a.pdf", then: .pdfText),
+        .keepAndAct("https://example.com", then: .qrCode),
     ]
 
     public static var all: [ActionDescriptor] {

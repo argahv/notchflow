@@ -24,7 +24,8 @@ final class IntentEngineTests: XCTestCase {
         var engine = IntentEngine()
         let link = try XCTUnwrap(suggestion(engine.evaluate(copy("https://github.com/argahv/notchflow"), in: situation)))
         XCTAssertEqual(link.rule, "clipboard.link")
-        XCTAssertEqual(link.actions, [.openURL(URL(string: "https://github.com/argahv/notchflow")!), .keepOnShelf("https://github.com/argahv/notchflow")])
+        XCTAssertEqual(link.actions, [.openURL(URL(string: "https://github.com/argahv/notchflow")!), .keepOnShelf("https://github.com/argahv/notchflow"),
+                                      .keepAndAct("https://github.com/argahv/notchflow", then: .qrCode)])
         XCTAssertEqual(link.reason, "You copied a web link in Xcode.")
         XCTAssertEqual(link.detail, "github.com/argahv/notchflow · Xcode")
         XCTAssertEqual(link.score, 0.7, accuracy: 0.0001)
