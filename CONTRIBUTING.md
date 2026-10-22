@@ -219,6 +219,7 @@ surface, modes). It feeds copies through the clipboard
 filters (never your real clipboard), posts activity to the sandbox inbox only, prints a pass or fail per
 check, and leaves snapshots in `build/sandbox-data/debug`. New suggestion rules need a unit test in
 `IntentEngineTests` and, when they change what's on screen, a check there.
+
 To post realistic activity, use the event CLI:
 
 ```bash
