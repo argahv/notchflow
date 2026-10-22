@@ -287,6 +287,31 @@ python3 Scripts/notchflow.py emit --title 'Deploy ready for review' --phase wait
 
 Events go to an owner-only local inbox; there's no listening port. See the [event contract](docs/INTEGRATIONS.md).
 
+## What I'm working on next — The Sixth Sense
+
+NotchFlow already brings files, agent activity, notifications and everyday tools into the notch. The next step is to make them **work together**: understand the moment, offer a useful next action, and disappear when there's nothing to do.
+
+These are **ideas and planned enhancements**, not a list of shipped features. Some build on functionality already in the developer preview; scope and timing may change as the project evolves.
+
+| Direction | What I'm exploring |
+|---|---|
+| **Intent Switch** | Context-aware modes for coding, studying, meetings, presentations and media, with controls that adapt to what you're doing. |
+| **Predictive Actions** | Relevant suggestions from clear signals: a copied address could open Maps, or a new PDF could offer document actions. |
+| **Magic Drop, expanded** | Build on the existing drop shelf and local actions with richer batch conversions, archives and file workflows. |
+| **Universal Voice Actions** | Optional push-to-talk commands to dictate, transform selected text and trigger approved actions. |
+| **Workspace Time Machine** | Save and restore supported apps, windows, documents and research sessions. |
+| **Life Moments** | Timely, quiet prompts for upcoming events, reminders and routines, rather than another noisy notification feed. |
+| **Meeting Guardian** | Extend existing meeting links with supported call controls, audio checks and presentation-aware privacy settings. |
+| **Memory Shelf** | Evolve the opt-in clipboard into a searchable, private history, potentially with optional on-device semantic search. |
+| **Device Continuity** | Explore an optional iPhone companion for sending links, snippets, files and user-authorized events to the Mac. |
+| **Flow Guardian** | Focus-aware suggestions, fewer interruptions and a concise catch-up when you're ready. |
+| **Teach My Mac** | User-defined, reviewable workflows that turn repetitive tasks into safe, reusable actions. |
+| **Universal Live Activities, expanded** | Extend today's agent/build/download stack to more real tasks such as conversions, recordings, timers and integrations. |
+
+The principle behind all twelve: **invisible when unnecessary, magical when needed.** Features should be native, lightweight, privacy-first and useful without a cloud account or paid AI service. Optional capabilities will ask for permissions when needed; nothing sensitive should be sent off-device silently.
+
+**Want to help shape these?** Share use cases in [Discussions](https://github.com/argahv/notchflow/discussions), or check [Contributing](CONTRIBUTING.md) to help turn ideas into tested features.
+
 ## Status
 
 **Developer preview (0.2).** NotchFlow is built and tested on a MacBook Air with a notch: 110 Swift and 24
