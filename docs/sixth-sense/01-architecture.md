@@ -1,0 +1,122 @@
+# Sixth Sense: architecture decisions
+
+The brief asks for four foundational systems. NotchFlow already has strong versions of two of them, so
+this branch adds what's missing and connects it to what exists, instead of building a parallel app.
+
+```
+ observers (app)            NotchCore (pure, tested)                      app
+ ───────────────            ─────────────────────────────────────         ──────────────────────────
+ FrontmostAppObserver ─┐                                                   ┌─ activity ranking boost
+ ClipboardObserver ────┼─► ContextEvent ─► ContextGate ─► IntentEngine ─► Suggestion ─► SurfaceArbiter ─► suggestion glance
+ (more later)         ─┘    typed, privacy-   coalesce,    rules, score,     actions         tiers             │
+                            classified        dedupe,      cooldowns,                                         ▼
+                                              debounce     learning                       ActionCatalog + ActionGuard ─► SuggestionActions
+                                                                                          (declared capability)          (executor)
+```
+
+## ADR-1 · Context events are typed, privacy-classified, and never persisted
+
+`ContextEvent` (`NotchCore/ContextEvents.swift`) wraps one `ContextSignal`, a closed enum with an associated
+value per source. Every signal has a `PrivacyClass`:
+
+| Class | Example | Logged in the inspector | Persisted | Used while details are hidden |
+|---|---|---|---|---|
+| `system` | display or power changes | in full | no | yes |
+| `activity` | which app is in front | app name only | no | yes (ranking only) |
+| `content` | what was copied | kind and length only | **never** | **no** |
+
+**Why a closed enum rather than a dictionary payload:** the brief asks for typed, testable events, and a
+closed enum means every new source is a compile-time decision with a privacy class attached.
+
+Only sources that are actually wired have a case. There is no `meetingStateChanged` with nothing behind it.
+
+## ADR-2 · Coalescing is pure and deterministic
+
+`ContextGate` decides, per source, whether an event passes, is a duplicate (same fingerprint within the
+source's repeat window), or is deferred (inside the source's minimum interval; the latest deferred event
+wins and the app flushes it when the interval ends). Rapid ⌘-Tab cycling therefore settles on the app you
+land on, and copying the same thing twice in a row doesn't count twice. Because fingerprints are in-memory
+`Hasher` values, nothing derived from content outlives the process.
+
+## ADR-3 · Observers have a lifecycle and stop when nothing needs them
+
+`ContextObserver` (app side) mirrors the existing `ActivityProvider`: `start(emit)`, `stop()`, and a status
+for Settings. `ContextEngine` starts an observer only while a feature that consumes it is on:
+
+| Observer | Runs while | Mechanism |
+|---|---|---|
+| Frontmost app | "Follow the app in front" **or** suggestions are on | `NSWorkspace.didActivateApplicationNotification`; no polling |
+| Clipboard | clipboard history **or** copy suggestions are on | the existing `changeCount` comparison (macOS has no change notification); one shared poll |
+
+## ADR-4 · Intent is rules-first, explainable, and works with no model configured
+
+`IntentEngine` (`NotchCore/IntentEngine.swift`) maps an event to at most one `Suggestion`. No LLM, no
+network, no embeddings. The score is a sum of named components, so "Why this suggestion?" is the score
+itself rather than a story told after the fact:
+
+| Component | Range | Source |
+|---|---|---|
+| Rule match | 0.45–0.8 | how specific the rule is (a JSON document is less ambiguous than a long text) |
+| Detection confidence | ×0.6–1.0 | how much of the copied text the detected entity covers |
+| Context | −0.25…+0.1 | e.g. "Open link" scores lower when the link was copied *in a browser* |
+| Time sensitivity | 0…+0.1 | e.g. a date in the next week |
+| Learned preference | −0.3…+0.2 | accepted vs dismissed for this rule, on this Mac |
+| Recent prompts | −0.05 each | suggestions shown in the last hour |
+
+The threshold depends on sensitivity (Fewer 0.72, Balanced 0.6, More 0.48).
+
+Gates run before scoring, and each one reports a reason to the inspector: predictions off, category off,
+details hidden (content signals), quiet mode, quiet hours, the rule cooling down, the rule muted after
+repeated dismissals, the same content suggested recently, the hourly cap.
+
+**Learning is minimal and resettable.** `IntentLearning` stores, per rule id, counts of accepted,
+dismissed and ignored suggestions, the current run of consecutive dismissals, and two timestamps. No
+content, no app names, no history. Consecutive dismissals back off exponentially (2, 4, 8, 16 minutes…)
+and five in a row mute the rule until the person resets learning or accepts one from the Inspector.
+Dedupe keys and recent-prompt times live in `IntentSession`, which is memory only.
+
+## ADR-5 · Actions declare their capability; execution stays where it is
+
+`ActionCatalog` (`NotchCore/ActionCatalog.swift`) gives every action, the 31 existing `ContentAction`s and
+the new `SuggestedAction`s, one `ActionDescriptor`: inputs, outputs, required permissions, impact,
+confirmation, cancellation and undo. `ActionGuard.clearance` is the single check before anything runs. It
+returns missing permissions (which the glance turns into a contextual "Allow …" button), requires
+confirmation for anything destructive whatever the descriptor says, and refuses network access unless the
+descriptor declares it.
+
+**Why not rewrite the executor:** `ContentActionRunner` and `ActionRun` already handle tokens,
+progress, cancellation and undo correctly. The brief's gap was declaration and a capability boundary, not
+execution.
+
+## ADR-6 · One tier model for the surface
+
+`SurfaceArbiter` (`NotchCore/SurfacePriority.swift`) writes down the brief's six tiers: the person's own
+interaction (1), critical actionable work (2), task progress (3), time-sensitive suggestions (4), passive
+news (5), idle (6). The rules:
+
+1. Nothing takes the surface from the person: a drag, a drop's result, an editor or the open workspace.
+2. Only critical, actionable work preempts another glance.
+3. Everything else waits its turn and replays when the surface is free, if it's still fresh.
+
+`AttentionCenter` gains `holdBelow`: while a suggestion shows, passive and progress news waits behind
+it, and needs-input or failures still take the surface. A suggestion displaced that way counts as
+superseded, not dismissed, so it doesn't teach the engine anything.
+
+The Screenshot Magnet and Sound Island keep their existing waiting rules in this branch. Moving them onto
+the arbiter changes visible behavior (a screenshot would wait for the sound glance) and needs its own
+on-screen verification.
+
+## ADR-7 · Privacy is described by data
+
+`PrivacyCatalog` (`NotchCore/PrivacyCatalog.swift`) lists every capability that observes anything: what
+it observes, why, whether anything leaves the Mac, the macOS permission, where data is kept, how to turn
+it off and how to clear it. Settings › Privacy renders it, and tests check that every context source has
+an entry and that only capabilities that genuinely use the network say so.
+
+## What this branch deliberately does not do
+
+- No LLM summarise/rewrite: the brief makes them conditional on a configured provider, and none exists.
+- No semantic clipboard search, voice, workspace snapshots, device companion, workflow builder or
+  extension SDK. See [02-plan.md](02-plan.md) for their order, dependencies and what each needs.
+- No change to Magic Drop, Live Activities or the renderer beyond the new glance, because they already
+  meet the brief.

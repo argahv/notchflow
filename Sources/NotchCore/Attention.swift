@@ -34,8 +34,11 @@ public struct AttentionContext: Equatable, Sendable {
     public var editing: Bool
     public var expanded: Bool
     public var suppressed: Bool
-    public init(editing: Bool = false, expanded: Bool = false, suppressed: Bool = false) {
-        self.editing = editing; self.expanded = expanded; self.suppressed = suppressed
+    /// Another kind of glance (a suggestion) has the surface: items below this priority wait behind it,
+    /// items at or above it may take the surface (see `SurfaceArbiter`).
+    public var holdBelow: AttentionPriority
+    public init(editing: Bool = false, expanded: Bool = false, suppressed: Bool = false, holdBelow: AttentionPriority = .silent) {
+        self.editing = editing; self.expanded = expanded; self.suppressed = suppressed; self.holdBelow = holdBelow
     }
 }
 
@@ -74,6 +77,7 @@ public struct AttentionCenter: Sendable {
         guard item.priority.interrupts else { return .ignore }
         if context.suppressed { return .indicate }
         if context.editing || context.expanded { enqueue(item); return .indicate }
+        if item.priority < context.holdBelow { enqueue(item); return .indicate }
         if let current, current.priority >= item.priority { enqueue(item); return .queue }
         if item.priority < .critical, item.arrived.timeIntervalSince(lastPresented) < minimumInterval, current == nil {
             enqueue(item); return .queue
@@ -93,7 +97,8 @@ public struct AttentionCenter: Sendable {
         guard current == nil, !context.suppressed, !context.editing, !context.expanded else { return nil }
         guard now.timeIntervalSince(lastPresented) >= minimumInterval || pending.contains(where: { $0.priority == .critical }) else { return nil }
         pending.removeAll { $0.priority < .actionRequired && now.timeIntervalSince($0.arrived) > 30 }
-        guard let next = pending.max(by: { ($0.priority, $1.arrived) < ($1.priority, $0.arrived) }) else { return nil }
+        guard let next = pending.filter({ $0.priority >= context.holdBelow })
+            .max(by: { ($0.priority, $1.arrived) < ($1.priority, $0.arrived) }) else { return nil }
         pending.removeAll { $0.id == next.id }
         _ = present(AttentionItem(id: next.id, priority: next.priority, arrived: now))
         return current
