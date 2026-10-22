@@ -186,11 +186,14 @@ public struct IntentSituation: Sendable {
     /// Private details hidden, for example while presenting. Content signals are ignored.
     public var privateMode: Bool
     public var quietHours: QuietHours?
+    /// The work mode (see `WorkMode`): it tilts some kinds of suggestion up, and quiets them during calls.
+    public var mode: WorkMode
     public var calendar: Calendar
     public init(enabled: Bool = true, sensitivity: SuggestionSensitivity = .balanced, disabledCategories: Set<SuggestionCategory> = [],
-                quiet: Bool = false, privateMode: Bool = false, quietHours: QuietHours? = nil, calendar: Calendar = .current) {
+                quiet: Bool = false, privateMode: Bool = false, quietHours: QuietHours? = nil, mode: WorkMode = .general,
+                calendar: Calendar = .current) {
         self.enabled = enabled; self.sensitivity = sensitivity; self.disabledCategories = disabledCategories
-        self.quiet = quiet; self.privateMode = privateMode; self.quietHours = quietHours; self.calendar = calendar
+        self.quiet = quiet; self.privateMode = privateMode; self.quietHours = quietHours; self.mode = mode; self.calendar = calendar
     }
 }
 
@@ -292,6 +295,8 @@ public struct IntentEngine: Sendable {
         }
         let rule = candidate.rule
         var components = [ScoreComponent("Matches \(candidate.matchLabel)", candidate.base * candidate.confidence)] + candidate.adjustments
+        let tilt = situation.mode.suggestionAdjustment(for: candidate.category)
+        if tilt != 0 { components.append(ScoreComponent(situation.mode == .meeting ? "In a call" : "\(situation.mode.title) mode", tilt)) }
         let learned = learning.adjustment(for: rule)
         if learned != 0 { components.append(ScoreComponent(learned > 0 ? "You often use these" : "You often dismiss these", learned)) }
         let recent = session.shownInLastHour(now)

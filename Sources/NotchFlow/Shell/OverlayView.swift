@@ -541,12 +541,14 @@ private struct QuickAccessRow: View {
     @ObservedObject var model: AppModel
     var body: some View {
         VStack(spacing: 2) {
+            // The work mode decides which three are offered (General keeps Music, Shelf and Tools).
             HStack(spacing: 6) {
-                shortcut(.music, "Music", "music.note", 0)
-                shortcut(.shelf, "Shelf", "tray", 1)
-                shortcut(.tools(nil), "Tools", "square.grid.2x2", 2)
+                ForEach(Array(model.workMode.shortcuts.enumerated()), id: \.element) { index, shortcut in
+                    self.shortcut(shortcut.route, shortcut.title, shortcut.symbol, index)
+                }
             }
             .frame(maxHeight: .infinity)
+            if model.showsModeLine { ModeLine(model: model) }
             // Shown until dismissed or until the first drop, then never again.
             if model.preferences.portalEnabled && !model.preferences.portalHintSeen {
                 HStack(spacing: 4) {
@@ -566,6 +568,30 @@ private struct QuickAccessRow: View {
     private func shortcut(_ route: Route, _ title: String, _ symbol: String, _ index: Int) -> some View {
         QuickShortcut(title: title, symbol: symbol) { model.navigate(route); model.windows?.focus() }
             .reveal(.primary, stagger: Double(index) * 0.03)
+    }
+}
+
+/// Which work mode the shortcuts are for, and why, with a pin to keep it. Shown only outside General.
+private struct ModeLine: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        let pinned = model.preferences.pinnedWorkMode != nil
+        HStack(spacing: 4) {
+            Image(systemName: model.workMode.symbol).font(.system(size: 9.5, weight: .semibold))
+            Text("\(model.workMode.title) · \(model.workModeReason)").font(.system(size: 10.5, weight: .medium))
+                .lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 2)
+            Button { model.togglePinnedWorkMode() } label: { Image(systemName: pinned ? "pin.fill" : "pin") }
+                .buttonStyle(IconButtonStyle(size: 16, tint: Ink.secondary))
+                .help(pinned ? "Follow what you do again" : "Keep \(model.workMode.title) mode")
+                .accessibilityLabel(pinned ? "Unpin work mode" : "Pin \(model.workMode.title) mode")
+        }
+        .foregroundStyle(Ink.secondary)
+        .frame(height: Metrics.hintRow)
+        .padding(.bottom, 4)
+        .reveal(.detail)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(model.workMode.title) mode, \(model.workModeReason)")
     }
 }
 

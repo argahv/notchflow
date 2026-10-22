@@ -174,6 +174,16 @@ struct CommandItem: Identifiable {
         preferences.$clipboardExcludedApps.dropFirst()
             .sink { [weak self] _ in DispatchQueue.main.async { self?.configureClipboard() } }
             .store(in: &subscriptions)
+        // Work modes: a pin, the switch and the detectors change what's observed and what the notch offers.
+        Publishers.Merge4(preferences.$workModesEnabled.dropFirst().map { _ in () },
+                          preferences.$pinnedWorkMode.dropFirst().map { _ in () },
+                          preferences.$modeDetectorsOff.dropFirst().map { _ in () },
+                          preferences.$mediaEnabled.dropFirst().map { _ in () })
+            .sink { [weak self] in DispatchQueue.main.async { self?.workModeSettingsChanged() } }
+            .store(in: &subscriptions)
+        media.$playing.removeDuplicates().dropFirst()
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.updateWorkMode() } }
+            .store(in: &subscriptions)
         battery.$percent.combineLatest(battery.$charging).scan((Int?.none, Int?.none, false)) { state, next in (state.1, next.0, next.1) }
             .sink { [weak self] previous, current, charging in self?.batteryChanged(from: previous, to: current, charging: charging) }
             .store(in: &subscriptions)
@@ -806,6 +816,7 @@ struct CommandItem: Identifiable {
             if let record = record(event.key), [.completed, .cancelled].contains(record.event.lifecycle),
                workspaceActivityIDs.contains(record.id), !record.isPinned { scheduleRetraction(record.id) }
             scheduleExpiryRefresh()
+            if event.category == .meeting { updateWorkMode() }
             if let order {
                 commit(snapshot, animation: Motion.quick, also: { self.workspaceActivityIDs = order; self.hoverChoice = self.refreshedHoverChoice() })
             } else { reflow() }
@@ -1101,9 +1112,12 @@ struct CommandItem: Identifiable {
 
     // MARK: Context
 
-    /// The app in front reorders the stack. The observer already ignores NotchFlow taking focus.
+    /// The app in front, and the work mode, reorder the stack. The observer already ignores NotchFlow taking
+    /// focus. An inferred mode adds to ranking only while ranking follows the app in front; a pinned one always does.
     private func applyContextBoost() {
-        let boost = preferences.contextAware ? ContextRules.boost(forFrontmost: frontmostApp) : []
+        let fromApp = preferences.contextAware ? ContextRules.boost(forFrontmost: frontmostApp) : []
+        let fromMode = preferences.contextAware || preferences.pinnedWorkMode != nil ? workMode.boosted : []
+        let boost = fromApp.union(fromMode)
         guard boost != contextBoost else { return }
         contextBoost = boost
         if interaction.presentation != .expanded { reflow() }
@@ -1160,7 +1174,8 @@ struct CommandItem: Identifiable {
         }
         guard let next = boundaries.min() else { return }
         let work = DispatchWorkItem { [weak self] in
-            self?.objectWillChange.send(); self?.reflow(); self?.scheduleExpiryRefresh()
+            // A call that ended expires its record, which can end the meeting mode.
+            self?.objectWillChange.send(); self?.updateWorkMode(); self?.reflow(); self?.scheduleExpiryRefresh()
         }
         expiryWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + next.timeIntervalSince(now) + 0.5, execute: work)
@@ -1861,6 +1876,68 @@ struct CommandItem: Identifiable {
         catch { message = "Could not save activity history: \(error.localizedDescription)" }
     }
 
+    // MARK: Work modes (Intent Switch)
+
+    /// The inferred mode once it has settled (see `ModeTracker`), with its reason.
+    @Published private(set) var modeReading = ModeReading.none
+    private var modeTracker = ModeTracker()
+    private var modeWork: DispatchWorkItem?
+    private var frontmostName: String?
+
+    /// What the notch is set up for: the pinned mode, else the inferred one, else General.
+    var workMode: WorkMode { preferences.pinnedWorkMode ?? (preferences.workModesEnabled ? modeReading.mode : .general) }
+    var workModeReason: String {
+        if preferences.pinnedWorkMode != nil { return "Pinned" }
+        return preferences.workModesEnabled ? modeReading.reason : "Following what you do is off"
+    }
+    /// A different reading that hasn't held long enough yet.
+    var pendingModeReading: ModeReading? { modeTracker.pending }
+    /// The resting hover says which mode it's in, when it isn't General and the drop tip isn't showing.
+    var showsModeLine: Bool { workMode != .general && !(preferences.portalEnabled && !preferences.portalHintSeen) }
+
+    /// Reads the signals the person allows and lets the tracker decide whether the mode changes now, later
+    /// (it checks again when a pending change would settle), or not at all.
+    private func updateWorkMode() {
+        modeWork?.cancel(); modeWork = nil
+        let previous = workMode
+        if preferences.workModesEnabled, preferences.pinnedWorkMode == nil {
+            let detectors = Set(ModeDetector.allCases).subtracting(preferences.modeDetectorsOff)
+            let live: Set<ActivityState> = [.running, .waiting]
+            let meeting = visibleActivities.first { $0.event.category == .meeting && live.contains($0.event.lifecycle) }?.event.title
+            let signals = ModeSignals(appInFront: frontmostApp, appName: frontmostName, meeting: meeting,
+                                      mediaPlaying: preferences.mediaEnabled && media.playing)
+            _ = modeTracker.observe(ModeRules.read(signals, detectors: detectors), at: Date())
+            if modeReading != modeTracker.current { modeReading = modeTracker.current }
+            if let settles = modeTracker.settlesAt {
+                let work = DispatchWorkItem { [weak self] in self?.updateWorkMode() }
+                modeWork = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + max(0, settles.timeIntervalSinceNow) + 0.1, execute: work)
+            }
+        }
+        if workMode != previous { workModeChanged() }
+    }
+
+    private func workModeSettingsChanged() {
+        let previous = workMode
+        synchronizeContext()
+        if workMode != previous { workModeChanged() } else { reflow() }
+    }
+
+    private func workModeChanged() {
+        contextEngine.noteMode("Mode · \(workMode.title) · \(workModeReason)")
+        applyContextBoost()
+        if interaction.presentation != .expanded { reflow() }
+    }
+
+    /// Keeps the current mode, or goes back to following what the person does.
+    func togglePinnedWorkMode() {
+        preferences.pinnedWorkMode = preferences.pinnedWorkMode == nil ? workMode : nil
+    }
+
+    #if DEBUG
+    func debugSetModeSettle(_ seconds: TimeInterval) { modeTracker.settle = seconds }
+    #endif
+
     // MARK: Suggestions
 
     /// What a suggestion's action left behind, shown in the same glance for a few seconds.
@@ -1890,18 +1967,21 @@ struct CommandItem: Identifiable {
     /// Starts and stops observers to match what's turned on. Nothing is observed for a feature that's off.
     private func synchronizeContext() {
         let suggesting = preferences.suggestionsEnabled && preferences.clipboardSuggestions
-        contextEngine.setEnabled(.frontmostApp, preferences.contextAware)
+        let modesWatchApps = preferences.workModesEnabled && preferences.pinnedWorkMode == nil && !preferences.modeDetectorsOff.contains(.apps)
+        contextEngine.setEnabled(.frontmostApp, preferences.contextAware || modesWatchApps)
         contextEngine.setEnabled(.clipboard, suggesting)
         configureClipboard()
-        if !contextEngine.isRunning(.frontmostApp) { frontmostApp = nil }
+        if !contextEngine.isRunning(.frontmostApp) { frontmostApp = nil; frontmostName = nil }
+        updateWorkMode()
         applyContextBoost()
         if !suggesting { pendingSuggestion = nil; closeSuggestion(.superseded) }
     }
 
     private func contextEvent(_ event: ContextEvent) {
         switch event.signal {
-        case .frontmostApp(let bundleID, _):
-            frontmostApp = bundleID
+        case .frontmostApp(let bundleID, let name):
+            frontmostApp = bundleID; frontmostName = name
+            updateWorkMode()
             applyContextBoost()
         case .clipboard:
             let decision = intent.evaluate(event, in: intentSituation)
@@ -1913,7 +1993,8 @@ struct CommandItem: Identifiable {
     private var intentSituation: IntentSituation {
         IntentSituation(enabled: preferences.suggestionsEnabled, sensitivity: preferences.suggestionSensitivity,
                         disabledCategories: preferences.suggestionCategoriesOff, quiet: preferences.quietMode, privateMode: preferences.privacy,
-                        quietHours: preferences.quietHoursEnabled ? QuietHours(start: preferences.quietHoursStart, end: preferences.quietHoursEnd) : nil)
+                        quietHours: preferences.quietHoursEnabled ? QuietHours(start: preferences.quietHoursStart, end: preferences.quietHoursEnd) : nil,
+                        mode: workMode)
     }
 
     /// Who has the surface, in `SurfaceArbiter`'s terms.
@@ -2107,6 +2188,16 @@ struct CommandItem: Identifiable {
         }
         items.append(CommandItem(id: "quiet", title: preferences.quietMode ? "Turn off quiet mode" : "Turn on quiet mode", symbol: "bell.slash") { [weak self] in self?.preferences.quietMode.toggle() })
         items.append(CommandItem(id: "privacy", title: preferences.privacy ? "Show private details" : "Hide private details", symbol: "eye.slash") { [weak self] in self?.preferences.privacy.toggle() })
+        for mode in WorkMode.allCases where preferences.pinnedWorkMode != mode {
+            items.append(CommandItem(id: "workmode-\(mode.rawValue)", title: "Pin \(mode.title) work mode", symbol: mode.symbol, hint: "Work mode") { [weak self] in
+                self?.preferences.pinnedWorkMode = mode
+            })
+        }
+        if preferences.pinnedWorkMode != nil {
+            items.append(CommandItem(id: "workmode-auto", title: "Follow what I'm doing", symbol: "wand.and.rays", hint: "Work mode") { [weak self] in
+                self?.preferences.pinnedWorkMode = nil
+            })
+        }
         let suggesting = preferences.suggestionsEnabled && preferences.clipboardSuggestions
         items.append(CommandItem(id: "suggestions", title: suggesting ? "Turn off copy suggestions" : "Turn on copy suggestions",
                                  symbol: "sparkles", hint: "Suggestions") { [weak self] in

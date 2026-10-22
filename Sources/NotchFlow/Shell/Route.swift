@@ -57,6 +57,52 @@ enum Tool: String, CaseIterable, Identifiable {
     }
 }
 
+/// Where each work mode's shortcuts go (see `WorkMode.shortcuts`).
+extension ModeShortcut {
+    var route: Route {
+        switch self {
+        case .activity: .activity(detail: nil)
+        case .music: .music
+        case .shelf: .shelf
+        case .tools: .tools(nil)
+        case .clipboard: .tools(.clipboard)
+        case .notes: .tools(.notes)
+        case .calendar: .tools(.calendar)
+        case .timer: .tools(.timer)
+        case .sound: .tools(.sound)
+        case .history: .history(detail: nil)
+        }
+    }
+    var title: String {
+        switch self {
+        case .activity: Feature.activity.title
+        case .music: Feature.music.title
+        case .shelf: Feature.shelf.title
+        case .tools: Feature.tools.title
+        case .history: Feature.history.title
+        case .clipboard: Tool.clipboard.title
+        case .notes: Tool.notes.title
+        case .calendar: Tool.calendar.title
+        case .timer: Tool.timer.title
+        case .sound: Tool.sound.title
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .activity: Feature.activity.symbol
+        case .music: Feature.music.symbol
+        case .shelf: Feature.shelf.symbol
+        case .tools: Feature.tools.symbol
+        case .history: Feature.history.symbol
+        case .clipboard: Tool.clipboard.symbol
+        case .notes: Tool.notes.symbol
+        case .calendar: Tool.calendar.symbol
+        case .timer: Tool.timer.symbol
+        case .sound: Tool.sound.symbol
+        }
+    }
+}
+
 /// What a screenshot's surface is doing after its preview: reading its text, or annotating it.
 enum CaptureMode: Hashable { case text, annotate }
 

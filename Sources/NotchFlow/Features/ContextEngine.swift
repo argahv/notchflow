@@ -54,7 +54,7 @@ import AppKit
         var last: Date?
     }
     struct LogEntry: Identifiable, Equatable {
-        enum Kind: Equatable { case lifecycle, event, suggested, held, outcome }
+        enum Kind: Equatable { case lifecycle, event, suggested, held, outcome, mode }
         let id = UUID()
         let date: Date
         let kind: Kind
@@ -95,7 +95,10 @@ import AppKit
 
     func stopAll() { for source in ContextSource.allCases { setEnabled(source, false) } }
 
-    private func receive(_ signal: ContextSignal) {
+    private func receive(_ signal: ContextSignal, scripted: Bool = false) {
+        #if DEBUG
+        if debugScripted.contains(signal.source) && !scripted { return }
+        #endif
         let event = ContextEvent(signal, at: Date())
         guard isRunning(event.source) else { return }
         switch gate.admit(event) {
@@ -144,7 +147,21 @@ import AppKit
         append(.outcome, "\(outcome.rawValue.capitalized) · \(suggestion.category.title)")
     }
 
+    /// A work-mode change, so the inspector shows why the notch offers what it does.
+    func noteMode(_ text: String) { append(.mode, text) }
+
     func clearLog() { log.removeAll() }
+
+    #if DEBUG
+    /// Scripted QA owns these sources: what the real observers report for them is ignored, so a test isn't
+    /// thrown by someone using the Mac.
+    var debugScripted: Set<ContextSource> = []
+    /// Scripted QA: a signal as if an observer had reported it, through the same gate.
+    func debugEmit(_ signal: ContextSignal) {
+        debugScripted.insert(signal.source)
+        receive(signal, scripted: true)
+    }
+    #endif
 
     private func append(_ kind: LogEntry.Kind, _ text: String, detail: String? = nil) {
         log.insert(LogEntry(date: Date(), kind: kind, text: text, detail: detail), at: 0)

@@ -136,7 +136,8 @@ enum Metrics {
             // from text), so there is no layout feedback loop and no horizontal jitter.
             switch model.glanceLead {
             case .quickAccess:
-                let hint = model.preferences.portalEnabled && !model.preferences.portalHintSeen
+                // One line under the shortcuts at most: the drop tip, or else which work mode they're for.
+                let hint = model.preferences.portalEnabled && !model.preferences.portalHintSeen || model.showsModeLine
                 return resolve(.content(width: display.notchWidth + 2 * Metrics.quickWing + (hint ? 40 : 0),
                                         height: Metrics.quickHeight + (hint ? Metrics.hintRow + 6 : 0)),
                                wing: Metrics.quickWing, ear: 8, corner: 18)

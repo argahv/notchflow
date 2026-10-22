@@ -31,6 +31,29 @@ struct SettingsView: View {
                     Text("Agents and builds rank higher in a terminal or editor, downloads in a browser, meetings in a calling app. It never opens the notch by itself.")
                 }
             }
+            Section("Work mode") {
+                Picker("Work mode", selection: Binding(get: { preferences.pinnedWorkMode }, set: { preferences.pinnedWorkMode = $0 })) {
+                    Text("Automatic").tag(WorkMode?.none)
+                    ForEach(WorkMode.allCases) { mode in Text(mode.title).tag(Optional(mode)) }
+                }
+                LabeledContent("Now", value: "\(model.workMode.title) · \(model.workModeReason)")
+                Text(model.workMode.summary).font(.caption).foregroundStyle(.secondary)
+                Toggle(isOn: $preferences.workModesEnabled) {
+                    Text("Follow what I'm doing")
+                    Text("Picks a mode from the app in front, a call in progress or music playing, after it has held for a few seconds. It changes the shortcuts on hover, which suggestions rank higher and which work ranks first. It never opens the notch, and Study is only ever chosen.")
+                }
+                .disabled(preferences.pinnedWorkMode != nil)
+                DisclosureGroup("Signals it uses") {
+                    ForEach(ModeDetector.allCases) { detector in
+                        Toggle(detector.title, isOn: Binding(get: { !preferences.modeDetectorsOff.contains(detector) }, set: { on in
+                            if on { preferences.modeDetectorsOff.remove(detector) } else { preferences.modeDetectorsOff.insert(detector) }
+                        }))
+                    }
+                    Text("Calls come from Meeting reminders and agent or script events, and music from Music / Spotify controls, when those are on. Nothing new is read for this.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .disabled(!preferences.workModesEnabled || preferences.pinnedWorkMode != nil)
+            }
             Section("Suggestions") {
                 Toggle(isOn: $preferences.suggestionsEnabled) {
                     Text("Suggest next steps")

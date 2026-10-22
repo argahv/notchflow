@@ -81,6 +81,22 @@ import AppKit
             default: break
             }
         case "privacy": model.preferences.privacy = argument == "on"
+        case "front":
+            // "front:<bundle id>|<name>": the app in front, through the same gate as the real observer; real
+            // activations are ignored from then on. "front:real" hands the source back to the real observer.
+            if argument == "real" { model.contextEngine.debugScripted.remove(.frontmostApp); break }
+            let parts = argument.split(separator: "|", maxSplits: 1).map(String.init)
+            model.contextEngine.debugEmit(.frontmostApp(bundleID: parts.first, name: parts.count > 1 ? parts[1] : nil))
+        case "mode":
+            // "mode:pin:<mode>", "mode:auto", "mode:follow:on|off", "mode:settle:<seconds>".
+            let parts = argument.split(separator: ":").map(String.init)
+            switch parts.first {
+            case "pin": if parts.count > 1, let mode = WorkMode(rawValue: parts[1]) { model.preferences.pinnedWorkMode = mode }
+            case "auto": model.preferences.pinnedWorkMode = nil
+            case "follow": model.preferences.workModesEnabled = parts.count > 1 && parts[1] == "on"
+            case "settle": if parts.count > 1, let seconds = Double(parts[1]) { model.debugSetModeSettle(seconds) }
+            default: break
+            }
         case "nowplaying":
             // "nowplaying:<title>|<artist>" or "nowplaying:off"
             let parts = argument.split(separator: "|", maxSplits: 1).map(String.init)
@@ -228,7 +244,8 @@ import AppKit
                    "inspector: " + model.contextEngine.log.prefix(6).map(\.text).joined(separator: " | "),
                    "learning: " + model.learnedRules.sorted { $0.key < $1.key }.map { "\($0.key) +\($0.value.accepted) -\($0.value.dismissed) ~\($0.value.ignored)" }.joined(separator: ", "),
                    "clipboard: history \(model.clipboard.enabled) · items \(model.clipboard.items.count) · skipped \(model.clipboard.skipped)",
-                   "waiting: " + model.waitingGlances.map { "\($0.kind.rawValue)/\($0.tier.title)" }.joined(separator: ",")]
+                   "waiting: " + model.waitingGlances.map { "\($0.kind.rawValue)/\($0.tier.title)" }.joined(separator: ","),
+                   "work mode: \(model.workMode.rawValue) · \(model.workModeReason) · pending \(model.pendingModeReading?.mode.rawValue ?? "-") · shortcuts \(model.workMode.shortcuts.map(\.rawValue).joined(separator: ",")) · line \(model.showsModeLine)"]
             try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)
         case "dumpHooks":
             let folder = AppFiles.root.appendingPathComponent("debug", isDirectory: true)

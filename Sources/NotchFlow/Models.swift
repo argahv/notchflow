@@ -112,13 +112,18 @@ struct QuickApp: Identifiable, Equatable {
     @Published var quietHoursEnd: Int { didSet { save("quietHoursEnd", quietHoursEnd) } }
     /// Bundle identifiers whose copies are never read, on top of the built-in password managers.
     @Published var clipboardExcludedApps: [String] { didSet { save("clipboardExcludedApps", clipboardExcludedApps) } }
+    /// Infer a work mode from signals NotchFlow already has (see `WorkMode`). It never opens the notch.
+    @Published var workModesEnabled: Bool { didSet { save("workModesEnabled", workModesEnabled) } }
+    /// A mode chosen by the person; it wins over inference until cleared.
+    @Published var pinnedWorkMode: WorkMode? { didSet { save("pinnedWorkMode", pinnedWorkMode?.rawValue ?? "") } }
+    @Published var modeDetectorsOff: Set<ModeDetector> { didSet { save("modeDetectorsOff", modeDetectorsOff.map(\.rawValue).sorted()) } }
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         defaults.register(defaults: ["overlayEnabled": true, "simulatedNotch": true, "portalEnabled": true, "soundIslandEnabled": true,
                                     "bridgeEnabled": true, "notchWidth": 190.0, "hoverDelay": 0.12,
                                     "showBattery": false, "historyRetentionDays": 30, "approvalWait": 25, "clipboardRetentionHours": 24, "contextAware": true,
-                                    "suggestionsEnabled": true, "quietHoursStart": 22, "quietHoursEnd": 8,
+                                    "suggestionsEnabled": true, "quietHoursStart": 22, "quietHoursEnd": 8, "workModesEnabled": true,
                                     "quickApps": ["com.apple.Terminal", "com.microsoft.VSCode", "com.apple.finder", "com.apple.Safari", "com.apple.Notes"]])
         overlayEnabled = defaults.bool(forKey: "overlayEnabled")
         simulatedNotch = defaults.bool(forKey: "simulatedNotch")
@@ -158,6 +163,9 @@ struct QuickApp: Identifiable, Equatable {
         quietHoursStart = defaults.integer(forKey: "quietHoursStart")
         quietHoursEnd = defaults.integer(forKey: "quietHoursEnd")
         clipboardExcludedApps = defaults.stringArray(forKey: "clipboardExcludedApps") ?? []
+        workModesEnabled = defaults.bool(forKey: "workModesEnabled")
+        pinnedWorkMode = WorkMode(rawValue: defaults.string(forKey: "pinnedWorkMode") ?? "")
+        modeDetectorsOff = Set((defaults.stringArray(forKey: "modeDetectorsOff") ?? []).compactMap(ModeDetector.init(rawValue:)))
     }
 
     var modeSettings: ModeSettings {
