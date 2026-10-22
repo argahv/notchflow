@@ -69,6 +69,13 @@ public enum MeetingLinks {
                 for entry in hosts where host == entry.suffix || host.hasSuffix("." + entry.suffix) {
                     if let path = entry.path, !candidate.path.hasPrefix(path) { continue }
                     if entry.suffix == "meet.google.com", candidate.path.count < 4 { continue }
+                    if entry.suffix == "webex.com" {
+                        let pathComponents = candidate.path.split(separator: "/")
+                        let isMeetingPath = (pathComponents.first == "meet" && pathComponents.count > 1)
+                            || pathComponents.first == "join" || candidate.path == "/j.php"
+                        guard host.hasSuffix(".webex.com"), host != "www.webex.com", isMeetingPath else { continue }
+                    }
+                    if entry.suffix == "whereby.com", candidate.path.split(separator: "/").count != 1 { continue }
                     return (candidate, entry.name)
                 }
             }
