@@ -3,6 +3,7 @@ import SwiftData
 import Combine
 import Carbon
 import Quartz
+import os
 
 @MainActor final class NotchPanel: NSPanel {
     /// The shelf's Quick Look source; the preview panel finds it through this window.
@@ -111,6 +112,13 @@ import Quartz
 /// frame is never animated; it grows before a transition and is trimmed after, so SwiftUI draws the
 /// whole morph and the panel never blocks input outside the visible surface once settled.
 @MainActor final class WindowManager {
+    let signposter = OSSignposter(subsystem: "com.argahv.notchflow", category: "Surface")
+
+    private struct TransitionInterval {
+        let name: StaticString
+        let state: OSSignpostIntervalState
+    }
+
     private let model: AppModel
     private let container: ModelContainer
     private let panel = NotchPanel()
@@ -125,6 +133,7 @@ import Quartz
     private var previousApp: NSRunningApplication?
     private var suspended = false
     private var transitions = 0
+    private var transitionIntervals = TransitionIntervalRegistry<TransitionInterval>()
     private var pointerNear = false
     private var dragZone = AppModel.DragProximity.away
     /// What the current drag carries, from its type list; nil when nothing in it can be kept.
@@ -209,7 +218,7 @@ import Quartz
         guard model.preferences.overlayEnabled, realNotch || model.preferences.simulatedNotch else {
             panel.orderOut(nil); model.backdrop.stop(); return
         }
-        transitions += 1
+        invalidateTransitions()
         model.reflow()
         panel.setFrame(self.frame(for: model.form.size), display: true)
         if !panel.isVisible { panel.orderFrontRegardless() }
@@ -229,8 +238,53 @@ import Quartz
         guard size.width > current.width || size.height > current.height else { return }
         panel.setFrame(frame(for: CGSize(width: max(current.width, size.width), height: max(current.height, size.height))), display: false)
         host?.layoutSubtreeIfNeeded()
+        signposter.emitEvent("Panel prepare")
     }
-    func beginTransition() -> Int { transitions += 1; return transitions }
+    func beginTransition() -> Int {
+        transitions += 1
+        endSupersededIntervals(replacedBy: transitions)
+        return transitions
+    }
+
+    func invalidateTransitions() {
+        transitions += 1
+        endSupersededIntervals(replacedBy: transitions)
+    }
+
+    func beginSignpostInterval(_ name: StaticString, for transition: Int) {
+        guard signposter.isEnabled else { return }
+        let state = signposter.beginInterval(name, id: signposter.makeSignpostID(), "transition: \(transition)")
+        transitionIntervals.insert(TransitionInterval(name: name, state: state), for: transition)
+    }
+
+    func endSignpostInterval(_ transition: Int, reason: TransitionIntervalEndReason) {
+        guard let ending = transitionIntervals.end(transition, reason: reason) else { return }
+        emitSignpostEnd(ending)
+    }
+
+    private func endSupersededIntervals(replacedBy latestTransition: Int) {
+        let superseded = transitionIntervals.supersede(before: latestTransition)
+        for ending in superseded {
+            emitSignpostEnd(ending)
+        }
+    }
+
+    private func emitSignpostEnd(
+        _ ending: (transition: Int, interval: TransitionInterval, reason: TransitionIntervalEndReason)
+    ) {
+        switch ending.reason {
+        case .completed:
+            signposter.endInterval(ending.interval.name, ending.interval.state,
+                                   "transition: \(ending.transition) completed")
+        case .fallback:
+            signposter.endInterval(ending.interval.name, ending.interval.state,
+                                   "transition: \(ending.transition) fallback")
+        case .superseded(let replacement):
+            signposter.endInterval(ending.interval.name, ending.interval.state,
+                                   "transition: \(ending.transition) superseded by: \(replacement)")
+        }
+    }
+
     func isLatest(_ transition: Int) -> Bool { transition == transitions }
 
     #if DEBUG
@@ -258,7 +312,10 @@ import Quartz
     func settle(_ transition: Int) {
         guard transition == transitions, panel.isVisible, !suspended else { return }
         let target = frame(for: model.form.size)
-        if panel.frame != target { panel.setFrame(target, display: true) }
+        if panel.frame != target {
+            signposter.emitEvent("Panel trim")
+            panel.setFrame(target, display: true)
+        }
     }
 
     func updateFocus() {

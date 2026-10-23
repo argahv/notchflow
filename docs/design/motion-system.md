@@ -25,6 +25,15 @@ latest transition settles (with a 0.9 s fallback). Since 2.0, the form is resolv
 `also:` side effect, so anything that changes the content (retraction, hide, filter, a new urgent row)
 resizes the surface in the same motion. Opening the workspace freezes the stack's order before sizing.
 
+## How to measure
+
+Build the Release app with `bash Scripts/build.sh`, then profile it in Instruments with the
+**os_signpost** instrument. Record a surface open, collapse, and feature switch; intervals are named for
+their source and destination presentations and carry the transition number. `Panel prepare` and
+`Panel trim` events mark the surrounding window resizing. Interval end messages identify whether the
+animation completed, was superseded, or reached the 0.9 s fallback. Compare interval durations while
+tuning the presets above.
+
 ## 2.0 additions
 
 | Moment | Motion |

@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import Combine
 import CoreAudio
+import os
 
 /// One-second clock that runs only while something on screen counts down. Views that show time
 /// observe this instead of the model, so the rest of the surface never redraws on a tick.
@@ -683,6 +684,20 @@ struct CommandItem: Identifiable {
                                         focusing ? FlowGuardian.lowestPriorityDuringFocus : .silent))
     }
 
+    private func signpostName(from previous: Presentation, to next: Presentation) -> StaticString {
+        switch (previous, next) {
+        case (.collapsed, .collapsed): return "collapsed→collapsed"
+        case (.collapsed, .preview): return "collapsed→preview"
+        case (.collapsed, .expanded): return "collapsed→expanded"
+        case (.preview, .collapsed): return "preview→collapsed"
+        case (.preview, .preview): return "preview→preview"
+        case (.preview, .expanded): return "preview→expanded"
+        case (.expanded, .collapsed): return "expanded→collapsed"
+        case (.expanded, .preview): return "expanded→preview"
+        case (.expanded, .expanded): return "expanded→expanded"
+        }
+    }
+
     func send(_ event: InteractionEvent) {
         var next = snapshot; next.interaction.send(event)
         commit(next)
@@ -739,6 +754,15 @@ struct CommandItem: Identifiable {
         guard next != previous || nextForm != form || also != nil else { return }
         if nextForm.size != form.size { windows?.prepare(for: nextForm.size) }
         let transition = windows?.beginTransition() ?? 0
+        let intervalName: StaticString?
+        let transitionWindows = windows
+        if let transitionWindows, transitionWindows.signposter.isEnabled {
+            let name = signpostName(from: previous.interaction.presentation, to: next.interaction.presentation)
+            intervalName = name
+            transitionWindows.beginSignpostInterval(name, for: transition)
+        } else {
+            intervalName = nil
+        }
         let reshaping = nextForm.size != previousForm.size || next.interaction.presentation != previous.interaction.presentation
         let portalMoved = next.interaction.portal != previous.interaction.portal && next.interaction.presentation != .expanded
         let motion = animation ?? (portalMoved ? Motion.portal(to: next.interaction.portal)
@@ -758,13 +782,17 @@ struct CommandItem: Identifiable {
                 if nextForm.size != previousForm.size { windows?.prepare(for: nextForm.size) }
             }
             form = nextForm
-        } completion: { [weak self] in
-            self?.windows?.settle(transition)
-            if self?.windows?.isLatest(transition) ?? true { self?.surfaceMoving = false }
+        } completion: { [weak self, transitionWindows] in
+            if intervalName != nil { transitionWindows?.endSignpostInterval(transition, reason: .completed) }
+            transitionWindows?.settle(transition)
+            if transitionWindows?.isLatest(transition) ?? true { self?.surfaceMoving = false }
         }
         // Completions can be held back while the window isn't drawn (Mission Control, occlusion). A timed
-        // fallback still trims the panel, so it never lingers as an invisible block over the menu bar.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in self?.windows?.settle(transition) }
+        // fallback closes its interval and trims the panel, so neither lingers while the window is hidden.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [transitionWindows] in
+            if intervalName != nil { transitionWindows?.endSignpostInterval(transition, reason: .fallback) }
+            transitionWindows?.settle(transition)
+        }
         didCommit(from: previous)
     }
 
