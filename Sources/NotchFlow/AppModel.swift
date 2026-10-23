@@ -61,7 +61,7 @@ struct CommandItem: Identifiable {
         }
     }
     @Published private(set) var illumination: Illumination?
-    @Published private(set) var dockBadge: Tone?
+    @Published private(set) var dockBadge: AttentionPriority?
     @Published private(set) var dropTargeted = false
     @Published private(set) var lastArrival: UUID?
     @Published var geometry = DisplayGeometry(x: 0, y: 0, width: 1440, height: 900)
@@ -867,7 +867,7 @@ struct CommandItem: Identifiable {
             }
             illuminate(event.lifecycle.tone)
             if item.priority.interrupts, !(interaction.presentation == .expanded && route.feature == .activity) {
-                dockBadge = item.priority.tone
+                dockBadge = item.priority
             }
         case .ignore:
             if glance == .notification(item.id) { withAnimation(Motion.quick) { glance = .summary } }

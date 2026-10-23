@@ -145,6 +145,15 @@ extension AttentionPriority {
         case .silent: .neutral
         }
     }
+
+    var dockBadgeAccessibilityValue: String {
+        switch self {
+        case .critical: "Failure"
+        case .actionRequired: "Needs you"
+        case .informational: "Completed"
+        case .background, .silent: ""
+        }
+    }
 }
 
 /// A recognizable glyph for an event: its declared category first, then its free-form source name.
