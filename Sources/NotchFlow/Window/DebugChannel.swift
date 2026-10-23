@@ -251,8 +251,17 @@ import AppKit
             let briefTitle: String = model.handoffDraft.split(separator: "\n").first.map(String.init) ?? "-"
             let handoffLine: String = "handoff: offered \(offered) · \(briefTitle) · \(model.handoffDraft.count) chars · copied \(model.handoffCopied)"
             let searchLine: String = "search: " + (hits.isEmpty ? "-" : hits.map { String($0.prefix(5)) }.joined(separator: ","))
-            let lines = model.providers.statuses.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.label)" }
-                + ["route: \(model.route) · \(model.interaction.presentation)",
+            let sources: String = ContextSource.allCases.map { (source: ContextSource) -> String in
+                let state = model.contextEngine.states[source]
+                return "\(source.rawValue)=\(state?.running == true ? "on" : "off")/\(state?.delivered ?? 0)/\(state?.coalesced ?? 0)"
+            }.joined(separator: " ")
+            let inspector: String = model.contextEngine.log.prefix(6).map(\.text).joined(separator: " | ")
+            let learning: String = model.learnedRules.sorted { $0.key < $1.key }
+                .map { "\($0.key) +\($0.value.accepted) -\($0.value.dismissed) ~\($0.value.ignored)" }.joined(separator: ", ")
+            let waiting: String = model.waitingGlances.map { "\($0.kind.rawValue)/\($0.tier.title)" }.joined(separator: ",")
+            // Built in typed pieces: as one expression, older compilers (Xcode 16) give up type-checking it.
+            var lines: [String] = model.providers.statuses.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.label)" }
+            lines += ["route: \(model.route) · \(model.interaction.presentation)",
                    "hover: \(model.hoverChoice.primary?.id ?? "-") + \(model.hoverChoice.secondary?.id ?? "-") +\(model.hoverChoice.others) · pin: \(model.hoverPin ?? "-")",
                    "context: \(model.contextBoost.map(\.rawValue).sorted().joined(separator: ","))",
                    "portal: \(model.interaction.portal.rawValue) · awareness: \(model.interaction.awareness.rawValue) · shelf: \(model.shelfCount)",
@@ -262,24 +271,21 @@ import AppKit
                    "capture text: \(model.captureText)",
                    "action context: \(model.actionContext.map { "\($0.kind.rawValue) \($0.title) pages=\($0.pageCount.map(String.init) ?? "-") sensitive=\($0.sensitive)" } ?? "-")",
                    "action: \(model.actionRun.phase) · created: \(model.actionCreated.count)",
-                   "portal actions: \(model.portalResult?.actions.map(\.rawValue).joined(separator: ",") ?? "-")",
-                   "agent pulse: \(model.agentPulse?.rawValue ?? "-")",
+                   "portal actions: \(model.portalResult?.actions.map(\.rawValue).joined(separator: ",") ?? "-")"]
+            lines += ["agent pulse: \(model.agentPulse?.rawValue ?? "-")",
                    "sound: \(model.sound.output?.name ?? "-") · volume \(model.sound.volume.map { String(format: "%.2f", $0) } ?? "-") · muted \(model.sound.muted.map(String.init) ?? "-") · bluetooth \(model.sound.bluetooth) · glance \(model.glance == .sound)",
                    "timeline: \(model.timeline.count) · at \(model.timelineCursor.index): \(model.timelineEntry.map { "\($0.kind.rawValue) \($0.title)" } ?? "-") · actions: \(model.timelineEntry.map { model.timelineActions($0).map(\.title).joined(separator: ",") } ?? "-")",
                    "celebration: \(model.celebration.map { "\($0.title) — \($0.detail) (\($0.batch.count))" } ?? "-")",
                    "annotations: \(model.annotations.items.map(\.tool.rawValue).joined(separator: ",")) · saved: \(model.annotatedCopy?.lastPathComponent ?? "-")",
-                   "mode: \(model.preferences.mode?.title ?? "Custom")",
-                   "suggestion: \(model.suggestion.map { "\($0.rule) · \($0.title) · \($0.actions.map(\.title).joined(separator: ",")) · score \(String(format: "%.2f", $0.score))" } ?? "-") · pending \(model.pendingSuggestion?.rule ?? "-") · why \(model.suggestionWhy) · result \(model.suggestionResult.map { "\($0.title) — \($0.detail ?? "") undo=\($0.canUndo)" } ?? "-")",
-                   "context sources: " + ContextSource.allCases.map { source in
-                       let state = model.contextEngine.states[source]
-                       return "\(source.rawValue)=\(state?.running == true ? "on" : "off")/\(state?.delivered ?? 0)/\(state?.coalesced ?? 0)"
-                   }.joined(separator: " "),
-                   "inspector: " + model.contextEngine.log.prefix(6).map(\.text).joined(separator: " | "),
-                   "learning: " + model.learnedRules.sorted { $0.key < $1.key }.map { "\($0.key) +\($0.value.accepted) -\($0.value.dismissed) ~\($0.value.ignored)" }.joined(separator: ", "),
+                   "mode: \(model.preferences.mode?.title ?? "Custom")"]
+            lines += ["suggestion: \(model.suggestion.map { "\($0.rule) · \($0.title) · \($0.actions.map(\.title).joined(separator: ",")) · score \(String(format: "%.2f", $0.score))" } ?? "-") · pending \(model.pendingSuggestion?.rule ?? "-") · why \(model.suggestionWhy) · result \(model.suggestionResult.map { "\($0.title) — \($0.detail ?? "") undo=\($0.canUndo)" } ?? "-")",
+                   "context sources: \(sources)",
+                   "inspector: \(inspector)",
+                   "learning: \(learning)",
                    "clipboard: history \(model.clipboard.enabled) · items \(model.clipboard.items.count) · skipped \(model.clipboard.skipped)",
                    chainLine, searchLine, handoffLine,
-                   "waiting: " + model.waitingGlances.map { "\($0.kind.rawValue)/\($0.tier.title)" }.joined(separator: ","),
-                   "focus: \(model.focus.active ? (model.focusing ? "holding" : "paused") : "off") · waiting \(model.focus.entries.count) · last \(model.focusSummary.map { "\($0.record) \($0.detail) waited=\($0.waited)" } ?? "-")",
+                   "waiting: \(waiting)"]
+            lines += ["focus: \(model.focus.active ? (model.focusing ? "holding" : "paused") : "off") · waiting \(model.focus.entries.count) · last \(model.focusSummary.map { "\($0.record) \($0.detail) waited=\($0.waited)" } ?? "-")",
                    "work mode: \(model.workMode.rawValue) · \(model.workModeReason) · pending \(model.pendingModeReading?.mode.rawValue ?? "-") · shortcuts \(model.workMode.shortcuts.map(\.rawValue).joined(separator: ",")) · line \(model.showsModeLine)"]
             try? lines.joined(separator: "\n").write(to: AppFiles.root.appendingPathComponent("debug/status.txt"), atomically: true, encoding: .utf8)
         case "dumpHooks":
