@@ -156,7 +156,7 @@ screenshots, and never moves, renames or deletes them. It's off by default.
 
 ## A next step for what you copy
 
-*New on the `feature/sixth-sense` branch, not in release 0.2 yet.* Turn on **Settings › Suggestions ›
+*New in 0.3.* Turn on **Settings › Suggestions ›
 Suggest from what you copy**, and a copy with an obvious next step grows out of the notch with it, once:
 
 | You copy | The notch offers |
@@ -341,7 +341,7 @@ These are **ideas and planned enhancements**, not a list of shipped features. So
 
 | Direction | What I'm exploring | Status |
 |---|---|---|
-| **Intent Switch** | Context-aware modes for coding, studying, meetings, presentations and media, with controls that adapt to what you're doing. | Built on `feature/sixth-sense`: six work modes |
+| **Intent Switch** | Context-aware modes for coding, studying, meetings, presentations and media, with controls that adapt to what you're doing. | Built: six work modes |
 | **Predictive Actions** | Relevant suggestions from clear signals: a copied address could open Maps, or a new PDF could offer document actions. | Built: suggestions for copies and finished downloads |
 | **Magic Drop, expanded** | Build on the existing drop shelf and local actions with richer batch conversions, archives and file workflows. | Built: Action Chains, Create ZIP, QR Code |
 | **Universal Voice Actions** | Optional push-to-talk commands to dictate, transform selected text and trigger approved actions. | Planned |
@@ -356,13 +356,13 @@ These are **ideas and planned enhancements**, not a list of shipped features. So
 
 The principle behind all twelve: **invisible when unnecessary, magical when needed.** Features should be native, lightweight, privacy-first and useful without a cloud account or paid AI service. Optional capabilities will ask for permissions when needed; nothing sensitive should be sent off-device silently.
 
-Built means implemented and tested on the `feature/sixth-sense` branches, not in release 0.2; see [the plan](docs/sixth-sense/02-plan.md).
+Built means implemented, tested and in release 0.3; see [the plan](docs/sixth-sense/02-plan.md).
 
 **Want to help shape these?** Share use cases in [Discussions](https://github.com/argahv/notchflow/discussions), or check [Contributing](CONTRIBUTING.md) to help turn ideas into tested features.
 
 ## Status
 
-**Developer preview (0.2).** NotchFlow is built and tested on a MacBook Air with a notch: 194 Swift and 24
+**Developer preview (0.3).** NotchFlow is built and tested on a MacBook Air with a notch: 194 Swift and 24
 Python tests run in CI on every push, alongside Debug and universal Release builds, plus end-to-end hook
 checks and frame-by-frame recordings of its transitions. The newest features (the portal, screenshots,
 actions, the agent heartbeat, the split island, Time Travel and the sound island) were run on a Debug build
