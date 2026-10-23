@@ -173,6 +173,7 @@ struct NotchBand: View {
             dockButton(symbol: "magnifyingglass", help: "Search and commands · ⌘K", selected: model.route == .command, index: 0) {
                 model.navigate(.command)
             }
+            .accessibilityLabel("Search and commands")
             Spacer(minLength: 4)
             ForEach(Array([Feature.activity, .music, .shelf].enumerated()), id: \.element) { index, feature in
                 featureButton(feature, index: index + 1)
@@ -207,7 +208,6 @@ struct NotchBand: View {
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             .tint(model.interaction.pinned ? Ink.silver : Ink.secondary)   // a state, not an action: no blue
             .frame(width: 26, height: 24)
-            .help("More")
             .help(model.interaction.pinned ? "Kept open · More" : "More")
             .accessibilityLabel(model.interaction.pinned ? "More, kept open" : "More")
             .reveal(.secondary, stagger: 6 * 0.022)
@@ -215,19 +215,34 @@ struct NotchBand: View {
         .padding(.leading, 6).padding(.trailing, model.form.ear + 6)
     }
 
+    @ViewBuilder
     private func featureButton(_ feature: Feature, index: Int) -> some View {
-        dockButton(symbol: feature.symbol, help: "\(feature.title) · ⌘\(feature.shortcut)",
-                   selected: model.route.feature == feature, badge: feature == .activity ? model.dockBadge : nil, index: index) {
+        let badgeValue = model.dockBadge.map { badge in
+            switch badge {
+            case .amber: "Needs you"
+            case .red: "Failure"
+            case .green: "Completed"
+            default: "Update"
+            }
+        }
+        let button = dockButton(symbol: feature.symbol, help: "\(feature.title) · ⌘\(feature.shortcut)",
+                                selected: model.route.feature == feature, badge: feature == .activity ? model.dockBadge : nil,
+                                index: index) {
             model.open(feature)
         }
         // A finished task retracting into History lands here with a small acknowledgement.
-        .keyframeAnimator(initialValue: 1.0, trigger: feature == .history ? model.historyPulse : nil) { content, scale in
-            content.scaleEffect(scale)
-        } keyframes: { _ in
-            SpringKeyframe(Motion.reduced ? 1 : 1.22, duration: 0.14)
-            SpringKeyframe(1, duration: 0.3)
+            .keyframeAnimator(initialValue: 1.0, trigger: feature == .history ? model.historyPulse : nil) { content, scale in
+                content.scaleEffect(scale)
+            } keyframes: { _ in
+                SpringKeyframe(Motion.reduced ? 1 : 1.22, duration: 0.14)
+                SpringKeyframe(1, duration: 0.3)
+            }
+            .accessibilityLabel(feature.title)
+        if feature == .activity, let badgeValue {
+            button.accessibilityValue(badgeValue)
+        } else {
+            button
         }
-        .accessibilityLabel(feature.title)
     }
 
     private func dockButton(symbol: String, help: String, selected: Bool, badge: Tone? = nil, slides: Bool = true, index: Int,
