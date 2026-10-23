@@ -3,6 +3,7 @@ import SwiftData
 import Combine
 import Carbon
 import Quartz
+import os
 
 @MainActor final class NotchPanel: NSPanel {
     /// The shelf's Quick Look source; the preview panel finds it through this window.
@@ -111,6 +112,8 @@ import Quartz
 /// frame is never animated; it grows before a transition and is trimmed after, so SwiftUI draws the
 /// whole morph and the panel never blocks input outside the visible surface once settled.
 @MainActor final class WindowManager {
+    let signposter = OSSignposter(subsystem: "com.argahv.notchflow", category: "Surface")
+
     private let model: AppModel
     private let container: ModelContainer
     private let panel = NotchPanel()
@@ -229,6 +232,7 @@ import Quartz
         guard size.width > current.width || size.height > current.height else { return }
         panel.setFrame(frame(for: CGSize(width: max(current.width, size.width), height: max(current.height, size.height))), display: false)
         host?.layoutSubtreeIfNeeded()
+        if signposter.isEnabled { signposter.emitEvent("Panel prepare") }
     }
     func beginTransition() -> Int { transitions += 1; return transitions }
     func isLatest(_ transition: Int) -> Bool { transition == transitions }
@@ -258,7 +262,10 @@ import Quartz
     func settle(_ transition: Int) {
         guard transition == transitions, panel.isVisible, !suspended else { return }
         let target = frame(for: model.form.size)
-        if panel.frame != target { panel.setFrame(target, display: true) }
+        if panel.frame != target {
+            if signposter.isEnabled { signposter.emitEvent("Panel trim") }
+            panel.setFrame(target, display: true)
+        }
     }
 
     func updateFocus() {

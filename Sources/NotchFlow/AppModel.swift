@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import Combine
 import CoreAudio
+import os
 
 /// One-second clock that runs only while something on screen counts down. Views that show time
 /// observe this instead of the model, so the rest of the surface never redraws on a tick.
@@ -683,6 +684,20 @@ struct CommandItem: Identifiable {
                                         focusing ? FlowGuardian.lowestPriorityDuringFocus : .silent))
     }
 
+    private func signpostName(from previous: Presentation, to next: Presentation) -> StaticString {
+        switch (previous, next) {
+        case (.collapsed, .collapsed): return "collapsed→collapsed"
+        case (.collapsed, .preview): return "collapsed→preview"
+        case (.collapsed, .expanded): return "collapsed→expanded"
+        case (.preview, .collapsed): return "preview→collapsed"
+        case (.preview, .preview): return "preview→preview"
+        case (.preview, .expanded): return "preview→expanded"
+        case (.expanded, .collapsed): return "expanded→collapsed"
+        case (.expanded, .preview): return "expanded→preview"
+        case (.expanded, .expanded): return "expanded→expanded"
+        }
+    }
+
     func send(_ event: InteractionEvent) {
         var next = snapshot; next.interaction.send(event)
         commit(next)
@@ -739,6 +754,21 @@ struct CommandItem: Identifiable {
         guard next != previous || nextForm != form || also != nil else { return }
         if nextForm.size != form.size { windows?.prepare(for: nextForm.size) }
         let transition = windows?.beginTransition() ?? 0
+        let signposter = windows?.signposter
+        let intervalName: StaticString?
+        let signpostInterval: OSSignpostIntervalState?
+        if let signposter, signposter.isEnabled {
+            let name = signpostName(from: previous.interaction.presentation, to: next.interaction.presentation)
+            intervalName = name
+            signpostInterval = signposter.beginInterval(
+                name,
+                id: signposter.makeSignpostID(),
+                "transition: \(transition)"
+            )
+        } else {
+            intervalName = nil
+            signpostInterval = nil
+        }
         let reshaping = nextForm.size != previousForm.size || next.interaction.presentation != previous.interaction.presentation
         let portalMoved = next.interaction.portal != previous.interaction.portal && next.interaction.presentation != .expanded
         let motion = animation ?? (portalMoved ? Motion.portal(to: next.interaction.portal)
@@ -759,6 +789,7 @@ struct CommandItem: Identifiable {
             }
             form = nextForm
         } completion: { [weak self] in
+            if let intervalName, let signpostInterval { signposter?.endInterval(intervalName, signpostInterval) }
             self?.windows?.settle(transition)
             if self?.windows?.isLatest(transition) ?? true { self?.surfaceMoving = false }
         }
