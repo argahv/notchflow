@@ -69,7 +69,6 @@ struct NotchBand: View {
     @ObservedObject var media: MediaService
     @EnvironmentObject var preferences: Preferences
     @Environment(\.nookNamespace) private var namespace
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let expanded = model.interaction.presentation == .expanded
@@ -130,7 +129,7 @@ struct NotchBand: View {
                         // Static while playing: a repeating effect would redraw the panel every frame for as
                         // long as music plays. A single cue marks a track change instead.
                         Image(systemName: "waveform").font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.silver)
-                            .symbolEffect(.bounce, value: reduceMotion || Motion.lowPower ? "" : media.title)
+                            .symbolEffect(.bounce, value: Motion.reduced || Motion.lowPower ? "" : media.title)
                     }
                 }
                 .nookMatched("music-art", in: namespace)
