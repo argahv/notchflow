@@ -24,7 +24,7 @@ Run a Debug build with `NOTCHFLOW_APP_SUPPORT` set to that same data folder. See
 All names and values below are case-sensitive. Where an argument is described as an identifier, use the corresponding activity, hover item, or shelf item identifier shown by the app/debug status. Some commands use a fallback for unrecognized values; see each command's behavior below.
 
 | Command | Argument forms | Effect | Example `.cmd` line |
-| --- | --- | --- |
+| --- | --- | --- | --- |
 | `event` | `enter`, `leave`, `expand`, `dismiss`, `pin`, `approach`, `dragApproach`, `retreat`, `beginEditing`, `endEditing` | Sends the named interaction event to the app. | `event:enter` |
 | `open` | `activity[.<activity-id>]`, `music`, `shelf`, `tools[.<tool>]`, `history`, `command`; tool: `notes`, `todos`, `clipboard`, `calendar`, `timer`, `apps`, `sound`, `system`, `mirror`, `shortcuts` | Opens the route; a tool or activity detail may be selected where shown. | `open:tools.notes` |
 | `back` | no argument | Navigates back. | `back` |
@@ -41,7 +41,7 @@ All names and values below are case-sensitive. Where an argument is described as
 | `filter` | `all`, `agents`, `pipelines`, `downloads`, `done` | Changes the activity stack filter. | `filter:all` |
 | `hide` | `<activity-id>` | Hides the matching activity from the stack. | `hide:activity-123` |
 | `pinRecord` | `<activity-id>` | Toggles the matching activity's pinned state. | `pinRecord:activity-123` |
-| `clip` | `<text>`, `1password:<text>`, `safari:<text>`, `concealed:<text>` | Sends test text through the clipboard filters as Xcode, 1Password, Safari, or a concealed copy; literal `\n` becomes a newline. | `clip:Demo text` |
+| `clip` | `<text>`, `1password:<text>`, `safari:<text>`, `concealed:<text>` | Sends test text through the clipboard filters as Xcode, 1Password, Safari, or a concealed copy. Only plain `clip:<text>` turns literal `\n` into a newline; the `1password:`, `safari:`, and `concealed:` forms pass it through unchanged. | `clip:Demo text` |
 | `suggest` | `on`, `off`, `run[:<index>]`, `why`, `dismiss`, `undo`, `reset`, `sensitivity:<fewer\|balanced\|more>` | Enables suggestions and clipboard suggestions, turns clipboard suggestions off, runs an offered action (default index `0`), toggles its explanation, dismisses/undoes it, resets learning, or changes sensitivity. | `suggest:on` |
 | `rescue` | `<activity-id>`, `copy` | Prepares a handoff brief for the activity, or copies the brief to the real macOS clipboard. | `rescue:activity-123` |
 | `chain` | `web-ready-images`, `compress-and-zip`, `document-bundle`, `pages-as-images` | Runs that action chain on compatible items already on the shelf. | `chain:web-ready-images` |

@@ -212,8 +212,7 @@ printf 'nowplaying:Night Drive|Demo Artist\nhover:enter\n' > "$debug/.01.tmp" &&
 ```
 
 The [Debug channel reference](docs/testing/debug-channel.md) lists every command and argument form, with a
-worked clipboard-filtering example. The source is [`Window/DebugChannel.swift`](Sources/NotchFlow/Window/DebugChannel.swift)
-(documenting it is [a help-wanted task](https://github.com/argahv/notchflow/issues/10)).
+worked clipboard-filtering example. The source is [`Window/DebugChannel.swift`](Sources/NotchFlow/Window/DebugChannel.swift).
 
 Suggestions have a scripted acceptance run: start a sandboxed Debug build as above, then
 `python3 -I Scripts/qa_suggestions.py "$PWD/build/sandbox-data"` (scenarios: basic, shelf, coordination, regression,
