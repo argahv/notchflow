@@ -8,6 +8,9 @@ a person or a real third-party session, with the steps given. Earlier first-pass
 
 ## Run the automated suites
 
+For the Debug-only command vocabulary, safe sandbox setup, and a worked clipboard-filtering scenario, see
+the [Debug channel reference](debug-channel.md).
+
 ```bash
 swift test
 ```
