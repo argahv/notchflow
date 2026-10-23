@@ -754,20 +754,14 @@ struct CommandItem: Identifiable {
         guard next != previous || nextForm != form || also != nil else { return }
         if nextForm.size != form.size { windows?.prepare(for: nextForm.size) }
         let transition = windows?.beginTransition() ?? 0
-        let signposter = windows?.signposter
         let intervalName: StaticString?
-        let signpostInterval: OSSignpostIntervalState?
-        if let signposter, signposter.isEnabled {
+        let transitionWindows = windows
+        if let transitionWindows, transitionWindows.signposter.isEnabled {
             let name = signpostName(from: previous.interaction.presentation, to: next.interaction.presentation)
             intervalName = name
-            signpostInterval = signposter.beginInterval(
-                name,
-                id: signposter.makeSignpostID(),
-                "transition: \(transition)"
-            )
+            transitionWindows.beginSignpostInterval(name, for: transition)
         } else {
             intervalName = nil
-            signpostInterval = nil
         }
         let reshaping = nextForm.size != previousForm.size || next.interaction.presentation != previous.interaction.presentation
         let portalMoved = next.interaction.portal != previous.interaction.portal && next.interaction.presentation != .expanded
@@ -788,14 +782,17 @@ struct CommandItem: Identifiable {
                 if nextForm.size != previousForm.size { windows?.prepare(for: nextForm.size) }
             }
             form = nextForm
-        } completion: { [weak self] in
-            if let intervalName, let signpostInterval { signposter?.endInterval(intervalName, signpostInterval) }
-            self?.windows?.settle(transition)
-            if self?.windows?.isLatest(transition) ?? true { self?.surfaceMoving = false }
+        } completion: { [weak self, transitionWindows] in
+            if intervalName != nil { transitionWindows?.endSignpostInterval(transition, reason: .completed) }
+            transitionWindows?.settle(transition)
+            if transitionWindows?.isLatest(transition) ?? true { self?.surfaceMoving = false }
         }
         // Completions can be held back while the window isn't drawn (Mission Control, occlusion). A timed
-        // fallback still trims the panel, so it never lingers as an invisible block over the menu bar.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in self?.windows?.settle(transition) }
+        // fallback closes its interval and trims the panel, so neither lingers while the window is hidden.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [transitionWindows] in
+            if intervalName != nil { transitionWindows?.endSignpostInterval(transition, reason: .fallback) }
+            transitionWindows?.settle(transition)
+        }
         didCommit(from: previous)
     }
 
