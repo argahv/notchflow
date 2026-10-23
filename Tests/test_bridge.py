@@ -135,9 +135,12 @@ class AgentHookTests(unittest.TestCase):
     def test_test_runs_are_labelled_without_sending_the_command(self):
         runs = ["swift test --filter Portal", "cd app && npm test", "npm run test:unit", "yarn run test",
                 "uv run pytest", "poetry run pytest -q", "env CI=1 npm test", "bunx vitest", "npx --yes jest",
-                "pnpm -r test", "pnpm --filter web test", "deno test", "FOO=1 pytest -q",
+                "npx playwright test", "pnpm -r test", "pnpm --filter web test", "pnpm -F web test",
+                "pnpm -C app test", "bun run test", "env CI=1 time pytest", "pytest -q; echo 'unfinished",
+                "cat <<'EOF'\n# it's a test\nEOF\npytest t.py", "deno test", "FOO=1 pytest -q",
                 "xcodebuild -scheme App test", "python3 -m unittest discover -s Tests", "time go test ./...",
                 "make lint; cargo test"]
+        runs.append("pytest -q; echo '" + "x" * 4100)  # The command cap may cut an open trailing quote.
         for command in runs:
             with self.subTest(command=command):
                 events, _ = self.run_hook(self.base("PreToolUse", tool_name="Bash", tool_input={"command": command}))

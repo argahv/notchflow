@@ -243,14 +243,13 @@ def git_context(cwd):
         common = (gitdir / commondir.strip()).resolve()
     return branch or None, github_repository(read_small(common / "config") or "")
 
-TEST_RUNNERS = ("swift test", "npm test", "npm run test", "pnpm test", "pnpm run test", "yarn test", "bun test",
-                "npx jest", "npx vitest", "npx playwright test", "jest", "vitest", "pytest", "python -m pytest",
+TEST_RUNNERS = ("swift test", "playwright test", "jest", "vitest", "pytest", "python -m pytest",
                 "python3 -m pytest", "python -m unittest", "python3 -m unittest", "go test", "cargo test", "rspec",
                 "bundle exec rspec", "rails test", "mvn test", "gradle test", "./gradlew test", "phpunit",
                 "vendor/bin/phpunit", "dotnet test", "mix test", "make test", "ctest", "deno test")
 
 def command_segments(command):
-    """Split shell commands on unquoted operators, or return no segments for malformed quoting."""
+    """Split shell commands on unquoted operators, preserving complete commands before malformed tails."""
     segments, current = [], []
     quote = None
     escaped = False
@@ -270,6 +269,11 @@ def command_segments(command):
         elif char in ("'", '"'):
             current.append(char)
             quote = char
+        elif char == "#" and (not current or current[-1].isspace()):
+            while index < len(command) and command[index] != "\n":
+                index += 1
+            segments.append("".join(current))
+            current = []
         elif char in (";", "|", "\n") or (char == "&" and index + 1 < len(command) and command[index + 1] == "&"):
             if char in "&|" and index + 1 < len(command) and command[index + 1] == char:
                 index += 1
@@ -279,7 +283,7 @@ def command_segments(command):
             current.append(char)
         index += 1
     if quote or escaped:
-        return []
+        return segments
     segments.append("".join(current))
     return segments
 
@@ -314,19 +318,21 @@ def runs_tests(tool_input):
                     words = words[2:] if len(words) > 1 else []
                 else:
                     break
+        while words and words[0] in ("sudo", "time", "exec"):
+            words.pop(0)
         if words and words[0] in ("uv", "poetry") and len(words) > 1 and words[1] == "run":
             words = words[2:]
         if words and words[0] in ("bunx", "npx"):
             words.pop(0)
             if words and words[0] in ("--yes", "-y"):
                 words.pop(0)
-        if words and words[0] in ("npm", "pnpm", "yarn"):
+        if words and words[0] in ("npm", "pnpm", "yarn", "bun"):
             manager, words = words[0], words[1:]
             if manager == "pnpm":
                 while words:
                     if words[0] in ("-r", "--recursive", "-w", "--workspace-root") or words[0].startswith("--filter="):
                         words.pop(0)
-                    elif words[0] in ("--filter", "--dir"):
+                    elif words[0] in ("--filter", "--dir", "-F", "-C"):
                         words = words[2:] if len(words) > 1 else []
                     else:
                         break
