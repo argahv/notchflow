@@ -28,9 +28,23 @@ final class ContentRulesTests: XCTestCase {
         XCTAssertEqual(zoom?.url.host, "us02web.zoom.us")
         XCTAssertEqual(MeetingLinks.join(in: ["https://meet.google.com/abc-defg-hij"])?.service, "Google Meet")
         XCTAssertEqual(MeetingLinks.join(in: ["https://teams.microsoft.com/l/meetup-join/19%3ameeting"])?.service, "Teams")
+        XCTAssertEqual(MeetingLinks.join(in: ["https://acme.webex.com/meet/alex"])?.service, "Webex")
+        XCTAssertEqual(MeetingLinks.join(in: ["https://acme.webex.com/join/12345"])?.service, "Webex")
+        XCTAssertEqual(MeetingLinks.join(in: ["https://acme.webex.com/j.php?MTID=m12345"])?.service, "Webex")
+        XCTAssertEqual(MeetingLinks.join(in: ["https://acme.webex.com/acme/j.php?MTID=m12345"])?.service, "Webex")
+        XCTAssertEqual(MeetingLinks.join(in: ["https://whereby.com/team-room"])?.service, "Whereby")
         XCTAssertNil(MeetingLinks.join(in: ["http://zoom.us/j/123"]), "HTTPS only")
         XCTAssertNil(MeetingLinks.join(in: ["https://zoom.us/pricing", "https://evil-zoom.us/j/1", "https://example.com/j/1"]))
         XCTAssertNil(MeetingLinks.join(in: ["https://meet.google.com/"]), "the bare homepage isn't a meeting")
+        for url in ["https://www.webex.com/pricing/index.html", "https://webex.com/",
+                    "https://www.webex.com/meet/alex", "https://acme.webex.com/pricing",
+                    "https://acme.webex.com/join-us",
+                    "https://whereby.com/pricing", "https://whereby.com/login",
+                    "https://notwebex.com/meet/alex", "https://webex.com.evil.test/meet/alex",
+                    "https://whereby.com/", "https://whereby.com/team-room/extra",
+                    "https://notwhereby.com/team-room", "https://whereby.com.evil.test/team-room"] {
+            XCTAssertNil(MeetingLinks.join(in: [url]), url)
+        }
     }
 
     func testDownloadNames() {

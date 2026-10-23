@@ -56,10 +56,36 @@ public enum ClipClassifier {
 /// Video-call join links from an event's URL, location and notes. Conservative: only well-known
 /// meeting hosts over HTTPS, so an arbitrary link in a description is never offered as "Join".
 public enum MeetingLinks {
-    static let hosts: [(suffix: String, path: String?, name: String)] = [
-        ("zoom.us", "/j/", "Zoom"), ("zoom.us", "/my/", "Zoom"), ("meet.google.com", nil, "Google Meet"),
-        ("teams.microsoft.com", "/l/meetup-join/", "Teams"), ("teams.live.com", "/meet/", "Teams"),
-        ("webex.com", nil, "Webex"), ("whereby.com", nil, "Whereby"), ("facetime.apple.com", "/join", "FaceTime")
+    private enum PathRule {
+        case prefix(String)
+        case googleMeet
+        case webex
+        case whereby
+
+        func accepts(host: String, path: String) -> Bool {
+            switch self {
+            case .prefix(let prefix): return path.hasPrefix(prefix)
+            case .googleMeet: return path.count >= 4
+            case .webex:
+                guard host.hasSuffix(".webex.com"), host != "www.webex.com" else { return false }
+                let components = path.split(separator: "/")
+                return (components.first == "meet" && components.count > 1)
+                    || components.first == "join" || components.last == "j.php"
+            case .whereby:
+                let components = path.split(separator: "/")
+                guard components.count == 1, let room = components.first else { return false }
+                return !["login", "pricing"].contains(room.lowercased())
+            }
+        }
+    }
+
+    private static let hosts: [(suffix: String, pathRule: PathRule, name: String)] = [
+        ("zoom.us", .prefix("/j/"), "Zoom"), ("zoom.us", .prefix("/my/"), "Zoom"),
+        ("meet.google.com", .googleMeet, "Google Meet"),
+        ("teams.microsoft.com", .prefix("/l/meetup-join/"), "Teams"),
+        ("teams.live.com", .prefix("/meet/"), "Teams"),
+        ("webex.com", .webex, "Webex"), ("whereby.com", .whereby, "Whereby"),
+        ("facetime.apple.com", .prefix("/join"), "FaceTime")
     ]
 
     public static func join(in texts: [String?]) -> (url: URL, service: String)? {
@@ -67,8 +93,7 @@ public enum MeetingLinks {
             for candidate in candidates(in: text) {
                 guard candidate.scheme?.lowercased() == "https", let host = candidate.host?.lowercased() else { continue }
                 for entry in hosts where host == entry.suffix || host.hasSuffix("." + entry.suffix) {
-                    if let path = entry.path, !candidate.path.hasPrefix(path) { continue }
-                    if entry.suffix == "meet.google.com", candidate.path.count < 4 { continue }
+                    guard entry.pathRule.accepts(host: host, path: candidate.path) else { continue }
                     return (candidate, entry.name)
                 }
             }
