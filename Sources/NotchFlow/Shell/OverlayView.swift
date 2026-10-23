@@ -215,19 +215,10 @@ struct NotchBand: View {
         .padding(.leading, 6).padding(.trailing, model.form.ear + 6)
     }
 
-    @ViewBuilder
     private func featureButton(_ feature: Feature, index: Int) -> some View {
-        let badgeValue = model.dockBadge.map { badge in
-            switch badge {
-            case .amber: "Needs you"
-            case .red: "Failure"
-            case .green: "Completed"
-            default: "Update"
-            }
-        }
-        let button = dockButton(symbol: feature.symbol, help: "\(feature.title) · ⌘\(feature.shortcut)",
-                                selected: model.route.feature == feature, badge: feature == .activity ? model.dockBadge : nil,
-                                index: index) {
+        dockButton(symbol: feature.symbol, help: "\(feature.title) · ⌘\(feature.shortcut)",
+                   selected: model.route.feature == feature, badge: feature == .activity ? model.dockBadge?.tone : nil,
+                   index: index) {
             model.open(feature)
         }
         // A finished task retracting into History lands here with a small acknowledgement.
@@ -238,11 +229,7 @@ struct NotchBand: View {
                 SpringKeyframe(1, duration: 0.3)
             }
             .accessibilityLabel(feature.title)
-        if feature == .activity, let badgeValue {
-            button.accessibilityValue(badgeValue)
-        } else {
-            button
-        }
+            .accessibilityValue(feature == .activity ? model.dockBadge?.dockBadgeAccessibilityValue ?? "" : "")
     }
 
     private func dockButton(symbol: String, help: String, selected: Bool, badge: Tone? = nil, slides: Bool = true, index: Int,
