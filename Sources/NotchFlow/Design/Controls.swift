@@ -212,7 +212,7 @@ struct ProgressLine: View {
             }
         }
         .frame(height: 3)
-        .animation(.linear(duration: 0.4), value: value)
+        .animation(Motion.reduced ? nil : .linear(duration: 0.4), value: value)
         .accessibilityElement().accessibilityLabel("Progress").accessibilityValue("\(Int(value * 100)) percent")
     }
 }
